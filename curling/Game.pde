@@ -9,7 +9,7 @@
 // Red throws first; teams alternate every shot until 8 total.
 // =============================================================
 
-static final int STONES_PER_TEAM = 4;
+static final int STONES_PER_TEAM = 8;
 static final int TOTAL_STONES    = STONES_PER_TEAM * 2;
 
 enum GameState { AIMING, SIMULATING, ENDED }
@@ -31,9 +31,6 @@ class Game {
   ArrayList<Stone> stones;
   int              currentTeam;   // TEAM_RED or TEAM_YELLOW
   int              stonesThrown;  // 0..TOTAL_STONES
-
-  // Hack / release point in world coords.
-  final PVector hack = new PVector(540, 1820);
 
   // Result of scoring (set when state becomes ENDED).
   int winningTeam = -1;
@@ -72,13 +69,14 @@ class Game {
     if (state != GameState.AIMING) return;
     if (stonesThrown >= TOTAL_STONES) return;
 
-    Stone s = new Stone(hack.x, hack.y, currentTeam);
+    PVector h = sheet.hackWorld();
+    Stone s = new Stone(h.x, h.y, currentTeam);
     s.curl = constrain(shot.curl, -1, 1);
 
-    // angle = 0 means straight up the sheet (negative y in world coords).
+    // angle = 0 means straight toward the house (+y in world coords).
     // Positive angle rotates clockwise (toward +x).
-    float vx =  sin(shot.angle) * shot.speed;
-    float vy = -cos(shot.angle) * shot.speed;
+    float vx = sin(shot.angle) * shot.speed;
+    float vy = cos(shot.angle) * shot.speed;
     s.vel.set(vx, vy);
 
     stones.add(s);

@@ -1,9 +1,9 @@
 // =============================================================
-// House - geometry of the rings and end-of-end scoring.
+// House - tee / ring geometry and end-of-end scoring.
 // =============================================================
-// The map PNG already draws the rings, so House does not render
-// them; it only owns the BUTTON location and the ring radii used
-// by the scoring rules. Real scoring is implemented in TODO 7.
+// Ring sizes and tee position come from the global Sheet (feet).
+// The sheet is drawn procedurally; House only handles distances
+// and scoring rules.
 // =============================================================
 
 class ScoreResult {
@@ -17,15 +17,19 @@ class ScoreResult {
 }
 
 class House {
-  // Button (tee) center in world coordinates.
-  final PVector BUTTON = new PVector(540, 360);
+  final PVector BUTTON;
+  final float OUTER_RING;
+  final float MID_RING;
+  final float INNER_RING;
+  final float BUTTON_R;
 
-  // Ring radii (world units), measured from the actual map pixels
-  // (sample along y=360 from x=540 outward).
-  final float OUTER_RING = 290;   // 12-foot (outer edge of blue ring)
-  final float MID_RING   = 213;   //  8-foot (outer edge of inner white)
-  final float INNER_RING = 137;   //  4-foot (outer edge of red center)
-  final float BUTTON_R   =  59;   //  central white "button"
+  House() {
+    BUTTON     = new PVector(sheet.centerX, sheet.teeY);
+    OUTER_RING = sheet.HOUSE_12_R_FT;
+    MID_RING   = sheet.HOUSE_8_R_FT;
+    INNER_RING = sheet.HOUSE_4_R_FT;
+    BUTTON_R   = sheet.BUTTON_R_FT;
+  }
 
   float distanceToButton(Stone s) {
     return PVector.dist(s.pos, BUTTON);
@@ -37,21 +41,20 @@ class House {
 
   // -----------------------------------------------------------
   // scoreEnd: real-curling scoring for a single end.
-  //   1. Drop stones whose nearest edge is outside the 12-foot ring.
-  //   2. Sort the remaining stones by distance to the button.
-  //   3. The team of the closest stone is the winner.
-  //   4. They score 1 point for each of their stones closer to the
-  //      button than the nearest opponent stone (i.e. the run of
-  //      same-team stones at the head of the sorted list).
-  //   5. If no stone is in the house, the end is blank.
+  //   1. Only stones that cleared the hog line count toward score.
+  //   2. Among those, keep stones inside the 12-foot ring.
+  //   3. Sort by distance to button; winner = closest stone's team.
+  //   4. Count consecutive same-team stones before first opponent.
+  //   5. Blank if nobody in the house with hog cleared.
   // -----------------------------------------------------------
   ScoreResult scoreEnd(ArrayList<Stone> stones) {
     ArrayList<Stone> inPlay = new ArrayList<Stone>();
-    for (Stone s : stones) if (inHouse(s)) inPlay.add(s);
+    for (Stone s : stones) {
+      if (s.hogPassed && inHouse(s)) inPlay.add(s);
+    }
 
     if (inPlay.isEmpty()) return new ScoreResult(-1, 0);
 
-    // Insertion sort by distanceToButton (small N -> trivial).
     for (int i = 1; i < inPlay.size(); i++) {
       Stone si = inPlay.get(i);
       float di = distanceToButton(si);

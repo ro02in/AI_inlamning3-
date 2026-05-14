@@ -259,17 +259,17 @@ class UI {
 
   // ----- sidebar layout (vertical regions) -------------------
   // y =   0 .. 130 : stats (header, turn, status, stones-left)
-  // y = 160 .. 460 : sliders (label above track, track, value below)
-  // y = 530 .. 560 : single active timing bar
-  // y = 600 .. 660 : action button (Lås vinkel / Lås fart / Ny match)
+  // y = 160 .. ~740 : sliders (label above track, track, value below)
+  // y = ~750 .. ~772 : single active timing bar
+  // y = ~798 .. ~858 : action button (Lås vinkel / Lås fart / Ny match)
   // -----------------------------------------------------------
   final float STATS_TOP    =  16;
   final float STATS_BOTTOM = 130;
   final float SLIDER_TOP   = 160;
-  final float SLIDER_H     = 280;
-  final float BAR_Y        = 540;
+  final float SLIDER_H     = 560;
+  final float BAR_Y        = 758;
   final float BAR_H        =  22;
-  final float BTN_TOP      = 600;
+  final float BTN_TOP      = 798;
 
   // ----- Lock-bar tunables (adjust to taste) -----------------
   // Oscillation rate (cycles per second) at curl=0 vs |curl|=1.
@@ -291,7 +291,7 @@ class UI {
     float c3 = panelLeft + colSpacing * 2.5;
 
     curlSlider  = new Slider("Curl",         -1, 1,    0,     c1, SLIDER_TOP, SLIDER_H, 2);
-    speedSlider = new Slider("Fart",          0, 1,    0.78f, c2, SLIDER_TOP, SLIDER_H, 2);
+    speedSlider = new Slider("Fart",          0, 1,    0.78f, c2, SLIDER_TOP, SLIDER_H, 3);
     angleSlider = new Slider("Vinkel\u00b0", -15, 15,  0,     c3, SLIDER_TOP, SLIDER_H, 1);
 
     float barW = SIDEBAR_W - 40;
@@ -341,7 +341,7 @@ class UI {
   // error grows linearly out to LOCK_*_ERR_MAX_* at the bar edges.
   // Speed slider is normalized 0..1 -> world units / s via SPEED_MAX.
   // -----------------------------------------------------------
-  final float SPEED_MAX = 1200.0;   // world units / s for slider value 1.0
+  final float SPEED_MAX = 40.0;   // ft/s at slider value 1.0
 
   // The "perfect" shot - slider values only, no lock-bar perturbation.
   // Used for the aim preview so the curve stays steady regardless of

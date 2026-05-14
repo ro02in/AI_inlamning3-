@@ -1,35 +1,29 @@
 // =============================================================
 // Curling - main sketch
 // =============================================================
-// World coordinates use the map image's pixel space directly:
-//   - Image is 1080 wide x 1920 tall (portrait).
-//   - House (button) center in world coords: (540, 360).
-//   - Hack / release point: (540, 1820).
-//   - Stones travel from the hack toward the house (negative y).
+// World coordinates are in FEET (see Sheet.pde). +y runs from the
+// hack toward the house and hog (top of the ice view). Stones
+// travel with positive vy when angle = 0.
 //
-// Rendering uses WORLD_TO_SCREEN to scale world units to the
-// on-screen window. All physics happens in world-space; only the
-// draw() side multiplies by WORLD_TO_SCREEN.
+// The ice is drawn procedurally from regulation dimensions; the
+// global Sheet handles feet-to-screen mapping with a uniform scale
+// so stones stay circular.
 // =============================================================
 
-// ----- World constants ---------------------------------------
-final int   WORLD_W = 1080;
-final int   WORLD_H = 1920;
-
-// World->screen scale for the ice viewport.
-final float WORLD_TO_SCREEN = 0.5;
-
-// On-screen layout: ice viewport on the left, UI sidebar on the right.
-final int   ICE_W     = (int) (WORLD_W * WORLD_TO_SCREEN);  // 540
-final int   ICE_H     = (int) (WORLD_H * WORLD_TO_SCREEN);  // 960
-final int   SIDEBAR_W = 220;
-final int   WIN_W     = ICE_W + SIDEBAR_W;                  // 760
-final int   WIN_H     = ICE_H;                              // 960
+// ----- Viewport (pixels) ---------------------------------------
+// Ice panel on the left; UI sidebar on the right.
+final int ICE_W     = 540;
+final int ICE_H     = 960;
+final int SIDEBAR_W = 220;
+final int WIN_W     = ICE_W + SIDEBAR_W;
+final int WIN_H     = ICE_H;
 
 // ----- Assets ------------------------------------------------
-PImage mapImg;
 PImage stoneRedImg;
 PImage stoneYellowImg;
+
+// ----- World / sheet ------------------------------------------
+Sheet sheet;
 
 // ----- Game world -------------------------------------------
 Game    game;
@@ -40,7 +34,7 @@ UI      ui;
 // Fixed simulation timestep (seconds). Drives Physics.step.
 final float DT = 1.0 / 60.0;
 
-// Toggle with 'd' to show alignment crosses for the button and hack.
+// Toggle with 'd' to show tee and hack markers.
 boolean DEBUG = false;
 
 // ----- Setup / draw ------------------------------------------
@@ -53,13 +47,13 @@ void setup() {
   imageMode(CENTER);
   textAlign(LEFT, TOP);
 
-  mapImg         = loadImage("curling-map.png");
   stoneRedImg    = loadImage("curling-stone-red.png");
   stoneYellowImg = loadImage("curling-stone-yellow.png");
 
+  sheet   = new Sheet();
   physics = new Physics();
   house   = new House();
-  ui      = new UI();        // before Game so Game.reset can call ui.onTurnStart
+  ui      = new UI();
   game    = new Game();
 }
 
@@ -69,7 +63,7 @@ void draw() {
   game.update();
   ui.update(DT);
 
-  drawMap();
+  sheet.drawSheet();
   if (game.state == GameState.AIMING) drawAimPreview(ui.intendedShot());
   for (Stone s : game.stones) s.draw();
   if (DEBUG) drawDebugMarkers();
@@ -97,7 +91,7 @@ void keyPressed() {
 
 // ----- Aim preview: forward-simulated trajectory in team color
 void drawAimPreview(Shot shot) {
-  ArrayList<PVector> path = physics.predictPath(game.hack, shot, 600, DT);
+  ArrayList<PVector> path = physics.predictPath(sheet.hackWorld(), shot, 800, DT);
 
   color teamColor = (game.currentTeam == TEAM_RED)
       ? color(235, 70, 70)
@@ -142,14 +136,6 @@ void drawEndOverlay() {
   popStyle();
 }
 
-// Draw the map fitted to the ice viewport (left side of the window).
-void drawMap() {
-  pushStyle();
-  imageMode(CORNER);
-  image(mapImg, 0, 0, ICE_W, ICE_H);
-  popStyle();
-}
-
 // Solid backdrop behind the sidebar.
 void drawSidebarBackdrop() {
   pushStyle();
@@ -161,10 +147,9 @@ void drawSidebarBackdrop() {
   popStyle();
 }
 
-// Small overlay so we can visually confirm the button location.
 void drawDebugMarkers() {
-  PVector b = worldToScreen(540, 360);   // button
-  PVector h = worldToScreen(540, 1820);  // hack
+  PVector b = worldToScreen(house.BUTTON);
+  PVector h = worldToScreen(sheet.hackWorld());
 
   pushStyle();
   noFill();
@@ -183,21 +168,21 @@ void drawDebugMarkers() {
   fill(0, 255, 0, 220);
   noStroke();
   textSize(11);
-  text("button (540, 360)", b.x + 8, b.y - 14);
+  text("tee", b.x + 8, b.y - 14);
   fill(255, 200, 0, 220);
-  text("hack (540, 1820)", h.x + 8, h.y - 14);
+  text("hack", h.x + 8, h.y - 14);
   popStyle();
 }
 
 // ----- Coordinate helpers ------------------------------------
 PVector worldToScreen(float wx, float wy) {
-  return new PVector(wx * WORLD_TO_SCREEN, wy * WORLD_TO_SCREEN);
+  return sheet.worldToScreen(new PVector(wx, wy));
 }
 
 PVector worldToScreen(PVector w) {
-  return worldToScreen(w.x, w.y);
+  return sheet.worldToScreen(w);
 }
 
 float worldToScreen(float wLen) {
-  return wLen * WORLD_TO_SCREEN;
+  return sheet.worldLenToScreen(wLen);
 }

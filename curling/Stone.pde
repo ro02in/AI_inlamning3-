@@ -9,9 +9,8 @@
 static final int TEAM_RED    = 0;
 static final int TEAM_YELLOW = 1;
 
-// Physics radius in world units. The stone PNGs are rendered
-// scaled so their visual radius matches this.
-static final float STONE_RADIUS = 30.0;
+// Physics radius in world units (feet). ~5.7 in granite radius.
+static final float STONE_RADIUS = 0.475;
 
 // Visual rotation rate (radians / s) at |curl| = 1, while the stone
 // is moving. Sign matches curl, so positive curl spins clockwise on
@@ -25,6 +24,7 @@ class Stone {
   float   curl;       // -1..+1, set at release, used by Physics.curlAccel
   float   radius;     // world units
   float   spinAngle;  // radians, advanced by Physics while moving + curling
+  boolean hogPassed;  // leading edge cleared hog line toward house
 
   Stone(float wx, float wy, int team) {
     this.pos       = new PVector(wx, wy);
@@ -33,6 +33,7 @@ class Stone {
     this.curl      = 0;
     this.radius    = STONE_RADIUS;
     this.spinAngle = 0;
+    this.hogPassed = false;
   }
 
   boolean isMoving() {

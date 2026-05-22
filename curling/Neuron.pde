@@ -5,9 +5,9 @@ class Neuron {
     Neuron(int inputCount) {
         weights = new float[inputCount];
         for (int i = 0; i < inputCount; i++) {
-            weights[i] = random(-1, 1);
+            weights[i] = random(-1, 1) / sqrt(inputCount); // Xavier initialization
         }
-        bias = random(-1, 1);
+        bias = random(-0.3, 0.3);
     }
 
     float activate(float[] inputs) {

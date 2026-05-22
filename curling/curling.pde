@@ -41,8 +41,12 @@ boolean DEBUG = false;
 enum AppMode { PLAY, TRAINING, TEST }
 
 AppMode appMode = AppMode.PLAY;
+boolean trainPinEnabled   = true;
+boolean trainScoreEnabled = false;
 PolicySearchTraining trainer;
 NeuralPolicy aiPolicy;
+ScoreHeuristic scoreHeuristic;
+CloseToButtonHeuristic pinHeuristic;
 
 int  trainingTarget = 100;
 int  trainingDone   = 0;
@@ -79,23 +83,31 @@ void setup() {
   ui      = new UI();
   game    = new Game();
 
-  trainer  = new PolicySearchTraining();
-  aiPolicy = trainer.current.copy();
+  trainer       = new PolicySearchTraining();
+  scoreHeuristic = new ScoreHeuristic();
+  pinHeuristic   = new CloseToButtonHeuristic();
+  aiPolicy      = trainer.current.copy();
+}
+
+ArrayList<Heuristic> activeTrainingHeuristics() {
+  ArrayList<Heuristic> heuristics = new ArrayList<Heuristic>();
+  if (trainPinEnabled)   heuristics.add(pinHeuristic);
+  if (trainScoreEnabled) heuristics.add(scoreHeuristic);
+  if (heuristics.isEmpty()) heuristics.add(pinHeuristic); // safety: at least one
+  return heuristics;
 }
 
 void draw() {
   background(20);
 
   if (appMode == AppMode.TRAINING && trainingActive) {
-    trainer.comparePolicies(new ArrayList<Heuristic>() {{
-      add(new ScoreHeuristic());
-    }});
+    trainer.comparePolicies(activeTrainingHeuristics());
     trainingDone++;
     if (trainingDone >= trainingTarget) {
       trainingActive = false;
       appMode = AppMode.PLAY;
       aiPolicy = trainer.current.copy();
-      trainingStatus = "Klar!";
+      trainingStatus = "Klar! (" + trainingDone + " jamf.)";
     }
   } else if (appMode == AppMode.TEST) {
     updateAiTest();
@@ -126,11 +138,28 @@ void draw() {
   if (appMode == AppMode.TRAINING) drawTrainingOverlay();
 }
 void startTraining(int comparisons) {
-  trainingTarget  = comparisons;
-  trainingDone    = 0;
-  trainingActive  = true;
-  trainingStatus  = "";
-  appMode         = AppMode.TRAINING;
+  if (trainingActive) return;
+  trainingTarget = trainingDone + comparisons;
+  trainingActive = true;
+  trainingStatus = "";
+  appMode        = AppMode.TRAINING;
+}
+
+void cancelTraining() {
+  if (!trainingActive) return;
+  trainingActive = false;
+  appMode        = AppMode.PLAY;
+  aiPolicy       = trainer.current.copy();
+  trainingStatus = "Avbruten (" + trainingDone + " jamf.)";
+}
+
+void resetTrainingModel() {
+  if (trainingActive) return;
+  trainer.reset();
+  aiPolicy       = trainer.current.copy();
+  trainingDone   = 0;
+  trainingTarget = 0;
+  trainingStatus = "Ny modell";
 }
 
 void startAiTest() {
@@ -157,6 +186,7 @@ void runAiTestSim() {
   aiTestRandom.randomize(aiTestStones, STONES_PER_TEAM);
   float[] state = aiPolicy.convertState(aiTestStones, 1, TEAM_RED);
   aiTestLastShot = aiPolicy.predict(state);
+  new PolicyDiagnostics().logTestShot(aiPolicy, aiTestStones, 1, TEAM_RED);
 
   PVector h = sheet.hackWorld();
   Stone fired = new Stone(h.x, h.y, TEAM_YELLOW);
@@ -238,7 +268,10 @@ void drawTrainingOverlay() {
   textSize(22);
   text("Tr\u00e4nar...", ICE_W * 0.5, ICE_H * 0.5 - 12);
   textSize(16);
-  text(trainingDone + " / " + trainingTarget, ICE_W * 0.5, ICE_H * 0.5 + 16);
+  text(trainingDone + " / " + trainingTarget, ICE_W * 0.5, ICE_H * 0.5 + 10);
+  textSize(13);
+  fill(200);
+  text("Avbryt med knappen i sidopanelen", ICE_W * 0.5, ICE_H * 0.5 + 32);
   popStyle();
 }
 

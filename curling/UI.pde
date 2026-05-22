@@ -251,37 +251,43 @@ class UI {
   Button     rndStateBtn;
   Button     trainBtn;
   Button     testBtn;
+  Button     resetModelBtn;
+  Button     pinHeuristicBtn;
+  Button     scoreHeuristicBtn;
   Slider     activeSlider;
 
   int        trainComparisons = 100;
   boolean    draggingTrainBar = false;
   final int  TRAIN_MIN = 10;
-  final int  TRAIN_MAX = 10000;
-  final float TRAIN_BAR_Y = 118;
+  final int  TRAIN_MAX = 1000000;
+  final float TRAIN_BAR_Y = 114;
   final float TRAIN_BAR_H = 10;
+  final float HEURISTIC_BTN_Y = 130;
+  final float HEURISTIC_BTN_H = 20;
+  final float AI_STATUS_Y = 154;
 
   // Lock workflow phase. 0 = locking angle, 1 = locking speed.
-  // Each click of the action button locks the active bar and either
-  // advances to the next phase or fires the shot.
   final int PHASE_ANGLE = 0;
   final int PHASE_SPEED = 1;
   int lockPhase;
 
   // ----- sidebar layout (vertical regions) -------------------
-  // y =   0 .. 130 : stats (header, turn, status, stones-left)
-  // y = 160 .. ~740 : sliders (label above track, track, value below)
-  // y = ~750 .. ~772 : single active timing bar
-  // y = ~798 .. ~858 : action button (Lås vinkel / Lås fart / Ny match)
+  // y =   0 .. 108 : stats (header, turn, status, stones-left)
+  // y = 108 .. 172 : AI panel (train bar, heuristics, status)
+  // y = 178 .. 673 : sliders
+  // y = 708        : timing bar
+  // y = 736        : shoot button
+  // y = 794 / 840  : train / extra buttons
   // -----------------------------------------------------------
   final float STATS_TOP    =  16;
-  final float STATS_BOTTOM = 130;
-  final float SLIDER_TOP   = 160;
-  final float SLIDER_H     = 560;
-  final float BAR_Y        = 758;
-  final float BAR_H        =  22;
-  final float BTN_TOP      = 798;
-  final float TRAIN_BTN_TOP = 862;
-  final float STATE_BTN_TOP = 912;
+  final float STATS_BOTTOM = 108;
+  final float SLIDER_TOP   = 178;
+  final float SLIDER_H     = 495;
+  final float BAR_Y        = 708;
+  final float BAR_H        =  20;
+  final float BTN_TOP      = 736;
+  final float TRAIN_BTN_TOP = 794;
+  final float EXTRA_BTN_TOP = 840;
 
   // ----- Lock-bar tunables (adjust to taste) -----------------
   // Oscillation rate (cycles per second) at curl=0 vs |curl|=1.
@@ -314,26 +320,34 @@ class UI {
     speedBar = new TimingBar("L\u00e5s fart",   barX, BAR_Y, barW, BAR_H);
 
     float btnW = SIDEBAR_W - 40;
+    float halfW = (btnW - 6) * 0.5f;
+    float halfX = ICE_W + (SIDEBAR_W - btnW) * 0.5f;
     shootBtn = new Button("L\u00e5s vinkel",
-                          ICE_W + (SIDEBAR_W - btnW) * 0.5,
+                          halfX,
                           BTN_TOP,
-                          btnW, 60);
+                          btnW, 52);
 
-    rndStateBtn = new Button("Random state",
-                          ICE_W + (SIDEBAR_W - btnW) * 0.5,
-                          STATE_BTN_TOP,
-                          btnW, 44);
-
-    float halfW = (btnW - 6) * 0.5;
-    float halfX = ICE_W + (SIDEBAR_W - btnW) * 0.5;
     trainBtn = new Button("Trana",
                           halfX,
                           TRAIN_BTN_TOP,
-                          halfW, 44);
+                          halfW, 40);
     testBtn  = new Button("Testa AI",
                           halfX + halfW + 6,
                           TRAIN_BTN_TOP,
-                          halfW, 44);
+                          halfW, 40);
+    resetModelBtn = new Button("Ny modell",
+                               halfX,
+                               EXTRA_BTN_TOP,
+                               halfW, 36);
+    rndStateBtn = new Button("Random state",
+                             halfX + halfW + 6,
+                             EXTRA_BTN_TOP,
+                             halfW, 36);
+
+    float hx = ICE_W + 20;
+    float hw = (SIDEBAR_W - 40 - 6) * 0.5f;
+    pinHeuristicBtn   = new Button("Pin",   hx, HEURISTIC_BTN_Y, hw, HEURISTIC_BTN_H);
+    scoreHeuristicBtn = new Button("Score", hx + hw + 6, HEURISTIC_BTN_Y, hw, HEURISTIC_BTN_H);
     lockPhase = PHASE_ANGLE;
   }
 
@@ -421,8 +435,9 @@ class UI {
     rndStateBtn.enabled = controlsEnabled && appMode == AppMode.PLAY;
     rndStateBtn.draw();
 
-    trainBtn.label   = trainingActive ? "Trana..." : "Trana";
-    trainBtn.enabled = controlsEnabled && appMode != AppMode.TEST;
+    trainBtn.label   = trainingActive ? "Avbryt" : "Trana";
+    trainBtn.enabled = appMode != AppMode.TEST
+                      && (trainingActive || controlsEnabled);
     trainBtn.draw();
 
     if (appMode == AppMode.TEST) {
@@ -433,6 +448,32 @@ class UI {
       testBtn.enabled = controlsEnabled;
     }
     testBtn.draw();
+    drawHeuristicButtons();
+
+    resetModelBtn.enabled = controlsEnabled && appMode != AppMode.TEST;
+    resetModelBtn.draw();
+  }
+
+  void drawHeuristicButtons() {
+    boolean canPick = appMode != AppMode.TRAINING && appMode != AppMode.TEST;
+    drawHeuristicButton(pinHeuristicBtn, trainPinEnabled, canPick);
+    drawHeuristicButton(scoreHeuristicBtn, trainScoreEnabled, canPick);
+  }
+
+  void drawHeuristicButton(Button btn, boolean selected, boolean enabled) {
+    pushStyle();
+    rectMode(CORNER);
+    noStroke();
+    if (!enabled)           fill(50);
+    else if (selected)      fill(90, 160, 100);
+    else if (btn.hover)     fill(70, 120, 160);
+    else                    fill(45, 85, 130);
+    rect(btn.x, btn.y, btn.w, btn.h, 4);
+    fill(enabled ? 255 : 140);
+    textAlign(CENTER, CENTER);
+    textSize(11);
+    text(btn.label, btn.x + btn.w * 0.5, btn.y + btn.h * 0.5);
+    popStyle();
   }
 
   void drawAiPanel() {
@@ -459,21 +500,47 @@ class UI {
 
     textAlign(RIGHT, TOP);
     fill(180);
-    text(trainComparisons + " jamf.", right, TRAIN_BAR_Y - 14);
+    textSize(9);
+    text(formatTrainCount(trainComparisons) + " jamf.", right, TRAIN_BAR_Y - 14);
 
     fill(200);
     textAlign(LEFT, TOP);
+    textSize(9);
     if (appMode == AppMode.TRAINING) {
-      text("Traning: " + trainingDone + " / " + trainingTarget, left, TRAIN_BAR_Y + 16);
+      text("Traning: " + trainingDone + " / " + trainingTarget
+           + "  (" + heuristicLabel() + ")", left, AI_STATUS_Y);
     } else if (trainingStatus.length() > 0) {
-      text(trainingStatus, left, TRAIN_BAR_Y + 16);
+      text(trainingStatus + "  (" + heuristicLabel() + ")", left, AI_STATUS_Y);
     } else if (appMode == AppMode.TEST) {
       text("Test: Rod " + testHumanWins + "  Gul " + testAiWins
-           + "  (" + testGamesPlayed + " sim)", left, TRAIN_BAR_Y + 16);
+           + "  (" + testGamesPlayed + " sim)", left, AI_STATUS_Y);
     } else {
-      text("Rod vs Gul (AI) i spel", left, TRAIN_BAR_Y + 16);
+      text("Heuristik: " + heuristicLabel() + "  |  " + trainingDone + " jamf.", left, AI_STATUS_Y);
     }
     popStyle();
+  }
+
+  String heuristicLabel() {
+    if (trainPinEnabled && trainScoreEnabled) return "Pin+Score";
+    if (trainPinEnabled)   return "Pin";
+    if (trainScoreEnabled) return "Score";
+    return "Pin";
+  }
+
+  void togglePinHeuristic() {
+    if (trainPinEnabled && !trainScoreEnabled) return; // keep at least one
+    trainPinEnabled = !trainPinEnabled;
+  }
+
+  void toggleScoreHeuristic() {
+    if (trainScoreEnabled && !trainPinEnabled) return; // keep at least one
+    trainScoreEnabled = !trainScoreEnabled;
+  }
+
+  String formatTrainCount(int n) {
+    if (n >= 1000000) return (n / 1000000) + "M";
+    if (n >= 1000)    return (n / 1000) + "k";
+    return str(n);
   }
 
   float trainBarX() { return ICE_W + 16; }
@@ -521,10 +588,10 @@ class UI {
     text(game.stateLabel(),                right, STATS_TOP + 44);
 
     // Two rows of stone-count dots.
-    drawTeamRow(left, STATS_TOP + 70, TEAM_RED);
-    drawTeamRow(left, STATS_TOP + 90, TEAM_YELLOW);
+    drawTeamRow(left, STATS_TOP + 64, TEAM_RED);
+    drawTeamRow(left, STATS_TOP + 82, TEAM_YELLOW);
 
-    // Separator line above the slider area.
+    // Separator above AI panel.
     stroke(60);
     strokeWeight(1);
     line(ICE_W + 12, STATS_BOTTOM, ICE_W + SIDEBAR_W - 12, STATS_BOTTOM);
@@ -595,8 +662,23 @@ class UI {
   // ---- Mouse wiring (called from main sketch) ---------------
   void onMousePressed(float mx, float my) {
     if (trainBtn.enabled && trainBtn.hits(mx, my)) {
-      startTraining(trainComparisons);
+      if (trainingActive) cancelTraining();
+      else startTraining(trainComparisons);
       return;
+    }
+    if (resetModelBtn.enabled && resetModelBtn.hits(mx, my)) {
+      resetTrainingModel();
+      return;
+    }
+    if (appMode != AppMode.TRAINING && appMode != AppMode.TEST) {
+      if (pinHeuristicBtn.hits(mx, my)) {
+        togglePinHeuristic();
+        return;
+      }
+      if (scoreHeuristicBtn.hits(mx, my)) {
+        toggleScoreHeuristic();
+        return;
+      }
     }
     if (testBtn.enabled && testBtn.hits(mx, my)) {
       if (appMode == AppMode.TEST) stopAiTest();
@@ -648,5 +730,8 @@ class UI {
     shootBtn.hover = shootBtn.hits(mx, my);
     trainBtn.hover = trainBtn.hits(mx, my);
     testBtn.hover  = testBtn.hits(mx, my);
+    resetModelBtn.hover = resetModelBtn.hits(mx, my);
+    pinHeuristicBtn.hover = pinHeuristicBtn.hits(mx, my);
+    scoreHeuristicBtn.hover = scoreHeuristicBtn.hits(mx, my);
   }
 }

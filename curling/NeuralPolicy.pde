@@ -1,6 +1,6 @@
 class NeuralPolicy {
     int inputSize = TOTAL_STONES * 4 + 2;
-    int hiddenSize = 12;
+    int hiddenSize = 32;
     int outputSize = 3;
 
     NeuronLayer hiddenLayer;
@@ -41,12 +41,15 @@ class NeuralPolicy {
         for (int slot = 0; slot < TOTAL_STONES; slot++) {
             if (slot < playedStones.size()) {
                 Stone s = playedStones.get(slot);
-                state[i++] = s.pos.x / sheet.SHEET_WIDTH_FT;
-                state[i++] = s.pos.y / sheet.yMax;
-                state[i++] = s.team == TEAM_RED ? 0 : 1;
-                state[i++] = 1;
+                state[i++] = (s.pos.x - sheet.centerX) / (sheet.SHEET_WIDTH_FT * 0.5);
+                state[i++] = (s.pos.y - sheet.hogY) / (sheet.backFarY - sheet.hogY);
+                state[i++] = s.team == TEAM_RED ? 1 : 0;
+                state[i++] = 1; // 1 = existing stone
             } else {
-                i += 4;
+                state[i++] = 2;
+                state[i++] = 2;
+                state[i++] = slot % 2 == 0 ? lastStoneTeam : (lastStoneTeam == TEAM_RED ? TEAM_YELLOW : TEAM_RED); // which team would throw here if there were a stone
+                state[i++] = -1;
             }
         }
         state[i++] = stonesLeft / (float) STONES_PER_TEAM;

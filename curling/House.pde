@@ -14,6 +14,16 @@ class ScoreResult {
     this.team   = team;
     this.points = points;
   }
+
+  float yellowFitness() {
+    if (team == TEAM_YELLOW) return points;
+    if (team == TEAM_RED)    return -points;
+    return 0;
+  }
+
+  float diffFrom(ScoreResult before) {
+    return yellowFitness() - before.yellowFitness();
+  }
 }
 
 class House {

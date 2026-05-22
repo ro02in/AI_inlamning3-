@@ -249,7 +249,16 @@ class UI {
   TimingBar  speedBar;
   Button     shootBtn;
   Button     rndStateBtn;
+  Button     trainBtn;
+  Button     testBtn;
   Slider     activeSlider;
+
+  int        trainComparisons = 100;
+  boolean    draggingTrainBar = false;
+  final int  TRAIN_MIN = 10;
+  final int  TRAIN_MAX = 10000;
+  final float TRAIN_BAR_Y = 118;
+  final float TRAIN_BAR_H = 10;
 
   // Lock workflow phase. 0 = locking angle, 1 = locking speed.
   // Each click of the action button locks the active bar and either
@@ -271,7 +280,8 @@ class UI {
   final float BAR_Y        = 758;
   final float BAR_H        =  22;
   final float BTN_TOP      = 798;
-  final float STATE_BTN_TOP = 868;
+  final float TRAIN_BTN_TOP = 862;
+  final float STATE_BTN_TOP = 912;
 
   // ----- Lock-bar tunables (adjust to taste) -----------------
   // Oscillation rate (cycles per second) at curl=0 vs |curl|=1.
@@ -309,10 +319,21 @@ class UI {
                           BTN_TOP,
                           btnW, 60);
 
-    rndStateBtn = new Button("L\u00e5s vinkel",
+    rndStateBtn = new Button("Random state",
                           ICE_W + (SIDEBAR_W - btnW) * 0.5,
                           STATE_BTN_TOP,
-                          btnW, 60);
+                          btnW, 44);
+
+    float halfW = (btnW - 6) * 0.5;
+    float halfX = ICE_W + (SIDEBAR_W - btnW) * 0.5;
+    trainBtn = new Button("Trana",
+                          halfX,
+                          TRAIN_BTN_TOP,
+                          halfW, 44);
+    testBtn  = new Button("Testa AI",
+                          halfX + halfW + 6,
+                          TRAIN_BTN_TOP,
+                          halfW, 44);
     lockPhase = PHASE_ANGLE;
   }
 
@@ -373,30 +394,108 @@ class UI {
 
   void draw() {
     drawStatsPanel();
+    drawAiPanel();
 
+    boolean controlsEnabled = appMode != AppMode.TRAINING;
     curlSlider.draw();
     speedSlider.draw();
     angleSlider.draw();
 
-    // Only the active bar is visible; the user locks it via the
-    // action button, which then swaps the bar to the next phase.
-    activeBar().draw();
+    if (controlsEnabled) activeBar().draw();
 
-    // Action button label depends on game state and lock phase.
-    if (game.state == GameState.ENDED) {
+    if (appMode == AppMode.TEST) {
+      shootBtn.label   = aiTestSimulating ? "..." : "Nasta test";
+      shootBtn.enabled = controlsEnabled && !aiTestSimulating;
+    } else if (game.state == GameState.ENDED) {
       shootBtn.label   = "Ny match";
-      shootBtn.enabled = true;
+      shootBtn.enabled = controlsEnabled;
     } else if (game.state == GameState.AIMING) {
       shootBtn.label   = (lockPhase == PHASE_ANGLE) ? "L\u00e5s vinkel" : "L\u00e5s fart";
-      shootBtn.enabled = true;
+      shootBtn.enabled = controlsEnabled && game.currentTeam == TEAM_RED;
     } else {
       shootBtn.label   = "...";
       shootBtn.enabled = false;
     }
     shootBtn.draw();
-    rndStateBtn.label   = "Set random state";
-    rndStateBtn.enabled = true;
+
+    rndStateBtn.enabled = controlsEnabled && appMode == AppMode.PLAY;
     rndStateBtn.draw();
+
+    trainBtn.label   = trainingActive ? "Trana..." : "Trana";
+    trainBtn.enabled = controlsEnabled && appMode != AppMode.TEST;
+    trainBtn.draw();
+
+    if (appMode == AppMode.TEST) {
+      testBtn.label   = "Avsluta";
+      testBtn.enabled = controlsEnabled;
+    } else {
+      testBtn.label   = "Testa AI";
+      testBtn.enabled = controlsEnabled;
+    }
+    testBtn.draw();
+  }
+
+  void drawAiPanel() {
+    float left  = ICE_W + 16;
+    float right = ICE_W + SIDEBAR_W - 16;
+    float barW  = right - left;
+    float barX  = left;
+
+    pushStyle();
+    textAlign(LEFT, TOP);
+    fill(150);
+    textSize(10);
+    text("AI", left, TRAIN_BAR_Y - 14);
+
+    noStroke();
+    fill(50);
+    rect(barX, TRAIN_BAR_Y, barW, TRAIN_BAR_H, 3);
+    float frac = trainBarFraction();
+    fill(80, 150, 210);
+    rect(barX, TRAIN_BAR_Y, barW * frac, TRAIN_BAR_H, 3);
+    float hx = barX + barW * frac;
+    fill(220);
+    ellipse(hx, TRAIN_BAR_Y + TRAIN_BAR_H * 0.5, 12, 12);
+
+    textAlign(RIGHT, TOP);
+    fill(180);
+    text(trainComparisons + " jamf.", right, TRAIN_BAR_Y - 14);
+
+    fill(200);
+    textAlign(LEFT, TOP);
+    if (appMode == AppMode.TRAINING) {
+      text("Traning: " + trainingDone + " / " + trainingTarget, left, TRAIN_BAR_Y + 16);
+    } else if (trainingStatus.length() > 0) {
+      text(trainingStatus, left, TRAIN_BAR_Y + 16);
+    } else if (appMode == AppMode.TEST) {
+      text("Test: Rod " + testHumanWins + "  Gul " + testAiWins
+           + "  (" + testGamesPlayed + " sim)", left, TRAIN_BAR_Y + 16);
+    } else {
+      text("Rod vs Gul (AI) i spel", left, TRAIN_BAR_Y + 16);
+    }
+    popStyle();
+  }
+
+  float trainBarX() { return ICE_W + 16; }
+  float trainBarW() { return SIDEBAR_W - 32; }
+
+  float trainBarFraction() {
+    float lo = log((float) TRAIN_MIN) / log(10);
+    float hi = log((float) TRAIN_MAX) / log(10);
+    float v  = log((float) trainComparisons) / log(10);
+    return constrain((v - lo) / (hi - lo), 0, 1);
+  }
+
+  void setTrainComparisonsFromMouse(float mx) {
+    float f = constrain((mx - trainBarX()) / trainBarW(), 0, 1);
+    float lo = log((float) TRAIN_MIN) / log(10);
+    float hi = log((float) TRAIN_MAX) / log(10);
+    trainComparisons = round(pow(10, lo + f * (hi - lo)));
+  }
+
+  boolean trainBarHit(float mx, float my) {
+    return mx >= trainBarX() && mx <= trainBarX() + trainBarW()
+        && my >= TRAIN_BAR_Y - 4 && my <= TRAIN_BAR_Y + TRAIN_BAR_H + 4;
   }
 
   // ----- stats panel: header + turn + status + stones-left ----
@@ -466,6 +565,11 @@ class UI {
   // SPACE keypress. Cycles: lock-angle -> lock-speed-and-fire,
   // or resets the game when the end is over.
   void triggerAction() {
+    if (appMode == AppMode.TRAINING) return;
+    if (appMode == AppMode.TEST) {
+      if (!aiTestSimulating) runAiTestSim();
+      return;
+    }
     if (game.state == GameState.ENDED) {
       game.reset();
     } else if (game.state == GameState.AIMING) {
@@ -490,6 +594,21 @@ class UI {
 
   // ---- Mouse wiring (called from main sketch) ---------------
   void onMousePressed(float mx, float my) {
+    if (trainBtn.enabled && trainBtn.hits(mx, my)) {
+      startTraining(trainComparisons);
+      return;
+    }
+    if (testBtn.enabled && testBtn.hits(mx, my)) {
+      if (appMode == AppMode.TEST) stopAiTest();
+      else startAiTest();
+      return;
+    }
+    if (trainBarHit(mx, my) && appMode != AppMode.TRAINING) {
+      draggingTrainBar = true;
+      setTrainComparisonsFromMouse(mx);
+      return;
+    }
+
     if (shootBtn.enabled && shootBtn.hits(mx, my)) {
       triggerAction();
       return;
@@ -501,6 +620,7 @@ class UI {
     }
 
     activeSlider = null;
+    if (appMode == AppMode.TRAINING || appMode == AppMode.TEST) return;
     if      (curlSlider .trackHit(mx, my)) activeSlider = curlSlider;
     else if (speedSlider.trackHit(mx, my)) activeSlider = speedSlider;
     else if (angleSlider.trackHit(mx, my)) activeSlider = angleSlider;
@@ -511,15 +631,22 @@ class UI {
   }
 
   void onMouseDragged(float mx, float my) {
+    if (draggingTrainBar) {
+      setTrainComparisonsFromMouse(mx);
+      return;
+    }
     if (activeSlider != null) activeSlider.setFromMouseY(my);
   }
 
   void onMouseReleased(float mx, float my) {
+    draggingTrainBar = false;
     if (activeSlider != null) activeSlider.dragging = false;
     activeSlider = null;
   }
 
   void onMouseMoved(float mx, float my) {
     shootBtn.hover = shootBtn.hits(mx, my);
+    trainBtn.hover = trainBtn.hits(mx, my);
+    testBtn.hover  = testBtn.hits(mx, my);
   }
 }

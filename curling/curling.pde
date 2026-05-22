@@ -37,9 +37,28 @@ final float DT = 1.0 / 60.0;
 // Toggle with 'd' to show tee and hack markers.
 boolean DEBUG = false;
 
-// AI stuff
+// ----- AI training / test ------------------------------------
+enum AppMode { PLAY, TRAINING, TEST }
 
+AppMode appMode = AppMode.PLAY;
+PolicySearchTraining trainer;
 NeuralPolicy aiPolicy;
+
+int  trainingTarget = 100;
+int  trainingDone   = 0;
+boolean trainingActive = false;
+String trainingStatus = "";
+
+int testGamesPlayed = 0;
+int testHumanWins     = 0;
+int testAiWins        = 0;
+int testBlankEnds     = 0;
+
+ArrayList<Stone> aiTestStones;
+RandomState      aiTestRandom;
+boolean          aiTestSimulating = false;
+ScoreResult      aiTestScore;
+Shot             aiTestLastShot;
 
 // ----- Setup / draw ------------------------------------------
 void settings() {
@@ -60,25 +79,165 @@ void setup() {
   ui      = new UI();
   game    = new Game();
 
-  // AI setup
-  aiPolicy = new NeuralPolicy();
+  trainer  = new PolicySearchTraining();
+  aiPolicy = trainer.current.copy();
 }
 
 void draw() {
   background(20);
-  physics.step(game.stones, DT);
-  game.update();
-  maybeAiShoot();
-  ui.update(DT);
+
+  if (appMode == AppMode.TRAINING && trainingActive) {
+    trainer.comparePolicies();
+    trainingDone++;
+    if (trainingDone >= trainingTarget) {
+      trainingActive = false;
+      appMode = AppMode.PLAY;
+      aiPolicy = trainer.current.copy();
+      trainingStatus = "Klar!";
+    }
+  } else if (appMode == AppMode.TEST) {
+    updateAiTest();
+    ui.update(DT);
+  } else {
+    physics.step(game.stones, DT);
+    game.update();
+    maybeAiShoot();
+    ui.update(DT);
+  }
 
   sheet.drawSheet();
-  if (game.state == GameState.AIMING) drawAimPreview(ui.intendedShot());
-  for (Stone s : game.stones) s.draw();
+  if (appMode == AppMode.TEST && aiTestStones != null) {
+    if (aiTestLastShot != null) drawShotPreview(aiTestLastShot, color(235, 205, 60));
+    for (Stone s : aiTestStones) s.draw();
+    drawAiTestOverlay();
+  } else {
+    if (game.state == GameState.AIMING && game.currentTeam == TEAM_RED) {
+      drawAimPreview(ui.intendedShot());
+    }
+    for (Stone s : game.stones) s.draw();
+    if (appMode != AppMode.TRAINING) drawEndOverlay();
+  }
   if (DEBUG) drawDebugMarkers();
 
   drawSidebarBackdrop();
   ui.draw();
-  drawEndOverlay();
+  if (appMode == AppMode.TRAINING) drawTrainingOverlay();
+}
+void startTraining(int comparisons) {
+  trainingTarget  = comparisons;
+  trainingDone    = 0;
+  trainingActive  = true;
+  trainingStatus  = "";
+  appMode         = AppMode.TRAINING;
+}
+
+void startAiTest() {
+  appMode = AppMode.TEST;
+  aiPolicy = trainer.current.copy();
+  testGamesPlayed = 0;
+  testHumanWins     = 0;
+  testAiWins        = 0;
+  testBlankEnds     = 0;
+  if (aiTestRandom == null) aiTestRandom = new RandomState();
+  runAiTestSim();
+}
+
+void stopAiTest() {
+  appMode = AppMode.PLAY;
+  aiTestSimulating = false;
+  aiTestStones = null;
+  aiTestScore = null;
+  aiTestLastShot = null;
+}
+
+void runAiTestSim() {
+  aiTestStones = new ArrayList<Stone>();
+  aiTestRandom.randomize(aiTestStones, STONES_PER_TEAM);
+  float[] state = aiPolicy.convertState(aiTestStones, 1, TEAM_RED);
+  aiTestLastShot = aiPolicy.predict(state);
+
+  PVector h = sheet.hackWorld();
+  Stone fired = new Stone(h.x, h.y, TEAM_YELLOW);
+  fired.curl = constrain(aiTestLastShot.curl, -1, 1);
+  fired.vel.set(sin(aiTestLastShot.angle) * aiTestLastShot.speed,
+                cos(aiTestLastShot.angle) * aiTestLastShot.speed);
+  aiTestStones.add(fired);
+
+  aiTestSimulating = true;
+  aiTestScore = null;
+}
+
+void updateAiTest() {
+  if (!aiTestSimulating || aiTestStones == null) return;
+
+  physics.step(aiTestStones, DT);
+  boolean anyMoving = false;
+  for (Stone s : aiTestStones) {
+    if (s.isMoving()) { anyMoving = true; break; }
+  }
+  if (!anyMoving) {
+    aiTestSimulating = false;
+    aiTestScore = house.scoreEnd(aiTestStones);
+    testGamesPlayed++;
+    if (aiTestScore.team == TEAM_YELLOW)      testAiWins++;
+    else if (aiTestScore.team == TEAM_RED)    testHumanWins++;
+    else testBlankEnds++;
+  }
+}
+
+void drawAiTestOverlay() {
+  pushStyle();
+  if (aiTestSimulating) {
+    fill(0, 140);
+    noStroke();
+    rect(0, ICE_H - 36, ICE_W, 36);
+    fill(240);
+    textAlign(CENTER, CENTER);
+    textSize(14);
+    text("Simulerar...", ICE_W * 0.5, ICE_H - 18);
+    popStyle();
+    return;
+  }
+  if (aiTestScore == null) { popStyle(); return; }
+
+  fill(0, 200);
+  noStroke();
+  rect(0, ICE_H * 0.5 - 55, ICE_W, 110);
+  textAlign(CENTER, CENTER);
+  if (aiTestScore.team < 0) {
+    fill(230);
+    textSize(24);
+    text("Oavgjord", ICE_W * 0.5, ICE_H * 0.5 - 10);
+  } else {
+    int t = aiTestScore.team;
+    color c = t == TEAM_RED ? color(230, 80, 80) : color(230, 210, 80);
+    String n = t == TEAM_RED ? "Rod" : "Gul (AI)";
+    fill(c);
+    textSize(28);
+    text(n + " vinner", ICE_W * 0.5, ICE_H * 0.5 - 12);
+    fill(240);
+    textSize(18);
+    text("med " + aiTestScore.points + " poang", ICE_W * 0.5, ICE_H * 0.5 + 16);
+  }
+  fill(200);
+  textSize(13);
+  text("Serie: Rod " + testHumanWins + " - " + testAiWins + " Gul  ("
+       + testGamesPlayed + ")", ICE_W * 0.5, ICE_H * 0.5 + 42);
+  popStyle();
+}
+
+void drawTrainingOverlay() {
+  pushStyle();
+  fill(0, 180);
+  noStroke();
+  rect(0, ICE_H * 0.5 - 50, ICE_W, 100);
+  fill(240);
+  textAlign(CENTER, CENTER);
+  textSize(22);
+  text("Tr\u00e4nar...", ICE_W * 0.5, ICE_H * 0.5 - 12);
+  textSize(16);
+  text(trainingDone + " / " + trainingTarget, ICE_W * 0.5, ICE_H * 0.5 + 16);
+  popStyle();
 }
 
 // ----- Mouse / keyboard input --------------------------------
@@ -98,6 +257,7 @@ void keyPressed() {
 }
 
 void maybeAiShoot() {
+  if (appMode != AppMode.PLAY) return;
   if (game.state != GameState.AIMING || game.currentTeam != TEAM_YELLOW) return;
 
   int lastTeam = TEAM_RED;
@@ -115,11 +275,14 @@ void maybeAiShoot() {
 
 // ----- Aim preview: forward-simulated trajectory in team color
 void drawAimPreview(Shot shot) {
-  ArrayList<PVector> path = physics.predictPath(sheet.hackWorld(), shot, 800, DT);
-
   color teamColor = (game.currentTeam == TEAM_RED)
       ? color(235, 70, 70)
       : color(235, 205, 60);
+  drawShotPreview(shot, teamColor);
+}
+
+void drawShotPreview(Shot shot, color teamColor) {
+  ArrayList<PVector> path = physics.predictPath(sheet.hackWorld(), shot, 800, DT);
 
   pushStyle();
   noFill();

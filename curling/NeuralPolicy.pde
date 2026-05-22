@@ -1,6 +1,6 @@
 class NeuralPolicy {
     int inputSize = TOTAL_STONES * 4 + 2;
-    int hiddenSize = 32;
+    int hiddenSize = 8;
     int outputSize = 3;
 
     NeuronLayer hiddenLayer;
@@ -15,15 +15,17 @@ class NeuralPolicy {
         float[] hiddenOutputs = hiddenLayer.feedForward(state);
         float[] outputValues = outputLayer.feedForward(hiddenOutputs);
 
+        float MIN_SPEED = UI.SPEED_MAX * 0.3f; // Minimum speed to prevent all shots from being too soft
+
         float curl = outputValues[0];
-        float speed = (outputValues[1] + 1) / 2 * UI.SPEED_MAX;
-        float angle = outputValues[2] * PI / 12;
+        float speed = MIN_SPEED + ((outputValues[1] + 1) / 2) * (UI.SPEED_MAX - MIN_SPEED);
+        float angle = outputValues[2] * PI / 18;
         return new Shot(curl, speed, angle);
     }
 
-    void mutate(float mutationRate) {
-        hiddenLayer.mutate(mutationRate);
-        outputLayer.mutate(mutationRate);
+    void mutate(float mutationRate, float mutationStrength) {
+        hiddenLayer.mutate(mutationRate, mutationStrength);
+        outputLayer.mutate(mutationRate, mutationStrength);
     }
 
     NeuralPolicy copy() {

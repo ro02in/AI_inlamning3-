@@ -18,14 +18,15 @@ class Neuron {
         return (float) Math.tanh(sum);
     }
 
-    void mutate(float mutationRate) {
+    void mutate(float mutationRate, float mutationStrength) {
         for (int i = 0; i < weights.length; i++) {
             if (random(1) < mutationRate) {
-                weights[i] += randomGaussian() * mutationRate;
+                weights[i] += randomGaussian() * mutationStrength;
             }
         }
-
-        bias += randomGaussian() * mutationRate;
+        if (random(1) < mutationRate) {
+            bias += randomGaussian() * mutationStrength;
+        }
     }
 
     Neuron copy() {

@@ -16,9 +16,9 @@ class NeuronLayer {
         return outputs;
     }
 
-    void mutate(float mutationRate) {
+    void mutate(float mutationRate, float mutationStrength) {
         for (Neuron neuron : neurons) {
-            neuron.mutate(mutationRate);
+            neuron.mutate(mutationRate, mutationStrength);
         }
     }
 

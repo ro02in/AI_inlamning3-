@@ -115,6 +115,7 @@ class PolicySearchTraining {
 
         if (mutatedScoreSum > currentScoreSum) {
             current = mutated.copy();
+            current.saveToFile("data/policy.txt"); // Sparar Senaste
         }
         mutated = current.copy();
         mutated.mutate(mutationRate, mutationStrength);

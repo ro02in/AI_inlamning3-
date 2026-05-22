@@ -17,7 +17,7 @@ class Slider {
   boolean dragging;
 
   Slider(String label, float minV, float maxV, float value,
-         float cx, float y, float h, int decimals) {
+        float cx, float y, float h, int decimals) {
     this.label    = label;
     this.minV     = minV;
     this.maxV     = maxV;

@@ -1,6 +1,6 @@
 class NeuralPolicy {
     int inputSize = TOTAL_STONES * 4 + 2;
-    int hiddenSize = 8;
+    int hiddenSize = 12;
     int outputSize = 3;
 
     NeuronLayer hiddenLayer;

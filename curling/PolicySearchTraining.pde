@@ -100,17 +100,20 @@ class PolicySearchTraining {
     }
 
     // Compare policies in a simulated scenario where AI has the last stone with simulated random stone layouts.
-    void comparePolicies(Heuristic heuristic) {
+    void comparePolicies(ArrayList<Heuristic> heuristics) {
         float currentScoreSum = 0;
         float mutatedScoreSum = 0;
-        for (int i = 0; i < heuristic.shotsPerComparison; i++) {
-            // Set up random stone layout (all but last yellow stone)
-            randomState.randomize(stones, STONES_PER_TEAM);
+        for (Heuristic heuristic : heuristics) {
 
-            // Build state and predict shot (1 yellow stone left to throw, then game ends)
-            float[] state = current.convertState(stones, 1, TEAM_RED);
-            currentScoreSum += heuristic.simulateShot(current, state, stones);
-            mutatedScoreSum += heuristic.simulateShot(mutated, state, stones);
+            for (int i = 0; i < heuristic.shotsPerComparison; i++) {
+                // Set up random stone layout (all but last yellow stone)
+                randomState.randomize(stones, STONES_PER_TEAM);
+
+                // Build state and predict shot (1 yellow stone left to throw, then game ends)
+                float[] state = current.convertState(stones, 1, TEAM_RED);
+                currentScoreSum += heuristic.simulateShot(current, state, stones);
+                mutatedScoreSum += heuristic.simulateShot(mutated, state, stones);
+            }
         }
 
         if (mutatedScoreSum > currentScoreSum) {

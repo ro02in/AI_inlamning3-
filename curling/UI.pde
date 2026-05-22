@@ -248,6 +248,7 @@ class UI {
   TimingBar  angleBar;
   TimingBar  speedBar;
   Button     shootBtn;
+  Button     rndStateBtn;
   Slider     activeSlider;
 
   // Lock workflow phase. 0 = locking angle, 1 = locking speed.
@@ -270,6 +271,7 @@ class UI {
   final float BAR_Y        = 758;
   final float BAR_H        =  22;
   final float BTN_TOP      = 798;
+  final float STATE_BTN_TOP = 868;
 
   // ----- Lock-bar tunables (adjust to taste) -----------------
   // Oscillation rate (cycles per second) at curl=0 vs |curl|=1.
@@ -307,6 +309,10 @@ class UI {
                           BTN_TOP,
                           btnW, 60);
 
+    rndStateBtn = new Button("L\u00e5s vinkel",
+                          ICE_W + (SIDEBAR_W - btnW) * 0.5,
+                          STATE_BTN_TOP,
+                          btnW, 60);
     lockPhase = PHASE_ANGLE;
   }
 
@@ -388,6 +394,9 @@ class UI {
       shootBtn.enabled = false;
     }
     shootBtn.draw();
+    rndStateBtn.label   = "Set random state";
+    rndStateBtn.enabled = true;
+    rndStateBtn.draw();
   }
 
   // ----- stats panel: header + turn + status + stones-left ----
@@ -471,10 +480,22 @@ class UI {
     }
   }
 
+  void setRndStones(){
+    RandomState rs = new RandomState();
+    rs.randomize(game.stones, STONES_PER_TEAM);
+    game.stonesThrown = TOTAL_STONES - 1;
+    game.currentTeam = TEAM_YELLOW;
+  }
+
   // ---- Mouse wiring (called from main sketch) ---------------
   void onMousePressed(float mx, float my) {
     if (shootBtn.enabled && shootBtn.hits(mx, my)) {
       triggerAction();
+      return;
+    }
+
+    if (rndStateBtn.enabled && rndStateBtn.hits(mx, my)){
+      setRndStones();
       return;
     }
 

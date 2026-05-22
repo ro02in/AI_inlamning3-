@@ -341,7 +341,7 @@ class UI {
   // error grows linearly out to LOCK_*_ERR_MAX_* at the bar edges.
   // Speed slider is normalized 0..1 -> world units / s via SPEED_MAX.
   // -----------------------------------------------------------
-  final float SPEED_MAX = 40.0;   // ft/s at slider value 1.0
+  final static float SPEED_MAX = 40.0;   // ft/s at slider value 1.0
 
   // The "perfect" shot - slider values only, no lock-bar perturbation.
   // Used for the aim preview so the curve stays steady regardless of
@@ -460,6 +460,7 @@ class UI {
     if (game.state == GameState.ENDED) {
       game.reset();
     } else if (game.state == GameState.AIMING) {
+      if (game.currentTeam == TEAM_YELLOW) return;
       if (lockPhase == PHASE_ANGLE) {
         angleBar.lockNow();
         lockPhase = PHASE_SPEED;

@@ -4,11 +4,13 @@ class ShotResult {
     ArrayList<Stone> stonesAfter;
     Stone            fired;
     ScoreResult      scoreBefore;
+    Shot             plannedShot;
 
-    ShotResult(ArrayList<Stone> stonesAfter, Stone fired, ScoreResult scoreBefore) {
+    ShotResult(ArrayList<Stone> stonesAfter, Stone fired, ScoreResult scoreBefore, Shot plannedShot) {
         this.stonesAfter = stonesAfter;
         this.fired       = fired;
         this.scoreBefore = scoreBefore;
+        this.plannedShot = plannedShot;
     }
 }
 
@@ -43,7 +45,7 @@ abstract class Heuristic {
             if (!anyMoving) break;
         }
 
-        return new ShotResult(simStones, fired, scoreBefore);
+        return new ShotResult(simStones, fired, scoreBefore, shot);
     }
 
     // Score a pre-simulated result (no physics; cheap).
@@ -63,22 +65,45 @@ abstract class Heuristic {
 // Heuristic that simulates the shot and scores it based on the end result (win/loss/tie).
 class ScoreHeuristic extends Heuristic {
     ScoreHeuristic() {
-        this.shotsPerComparison = 50;
-        this.scale = 4.0; // typical delta range -4..+4 → normalised to ~-1..+1
+        this.shotsPerComparison = 30;
+        this.scale = 3.0; // typical delta range -3..+3 → normalised to ~-1..+1
+        this.weight = 2.5; // make this heuristic more important relative to others
     }
 
     @Override
     float scoreResult(ShotResult result) {
         ScoreResult scoreAfter = house.scoreEnd(result.stonesAfter);
-        return scoreAfter.diffFrom(result.scoreBefore);
+        float score = scoreAfter.diffFrom(result.scoreBefore);
+
+        return score;
     }
 }
 
 // Heuristic that scores a shot only based on how close it is to the button.
 class CloseToButtonHeuristic extends Heuristic {
     CloseToButtonHeuristic() {
-        this.shotsPerComparison = 50;
-        this.scale = 50.0; // typical raw range ~-100..+30 → normalised to a comparable magnitude
+        this.shotsPerComparison = 30;
+        this.scale = 50.0;
+        this.weight = 0.8;
+    }
+
+    @Override
+    float scoreResult(ShotResult result) {
+        Stone fired = result.fired;
+        float fitness = 0;
+        float d = house.distanceToButton(fired);
+        fitness -= d; // closer to button = higher fitness
+        if (d < sheet.BUTTON_R_FT) fitness += 20;
+        return fitness;
+    }
+}
+
+// Heuristic that scores a shot based on various penalties and bonuses related to the fired stone's position.
+class PenaltyHeuristic extends Heuristic {
+    PenaltyHeuristic() {
+        this.shotsPerComparison = 30;
+        this.scale = 50.0;
+        this.weight = 1.2;
     }
 
     @Override
@@ -86,11 +111,7 @@ class CloseToButtonHeuristic extends Heuristic {
         Stone fired = result.fired;
         float fitness = 0;
         if (fired.pos.x < 0 || fired.pos.x > sheet.SHEET_WIDTH_FT) fitness -= 100;
-        if (fired.pos.y + fired.radius < sheet.hogY) fitness -= 50; // never reached house end
-        float d = house.distanceToButton(fired);
-        fitness -= d; // closer to button = higher fitness
-        if (house.inHouse(fired)) fitness += 10;
-        if (d < sheet.BUTTON_R_FT) fitness += 20;
+        if (fired.pos.y + fired.radius < sheet.hogY || fired.pos.y + fired.radius > sheet.backFarY) fitness -= 100; // too short (hog not cleared) or fully past far back line
         return fitness;
     }
 }

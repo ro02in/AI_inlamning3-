@@ -2,9 +2,13 @@ class NeuronLayer {
     Neuron[] neurons;
 
     NeuronLayer(int neuronCount, int inputCountPerNeuron) {
+        this(neuronCount, inputCountPerNeuron, false);
+    }
+
+    NeuronLayer(int neuronCount, int inputCountPerNeuron, boolean linear) {
         neurons = new Neuron[neuronCount];
         for (int i = 0; i < neuronCount; i++) {
-            neurons[i] = new Neuron(inputCountPerNeuron);
+            neurons[i] = new Neuron(inputCountPerNeuron, linear);
         }
     }
 
@@ -22,8 +26,15 @@ class NeuronLayer {
         }
     }
 
+    void clipAll() {
+        for (Neuron neuron : neurons) {
+            neuron.clip();
+        }
+    }
+
     NeuronLayer copy() {
-        NeuronLayer clone = new NeuronLayer(neurons.length, neurons[0].weights.length);
+        NeuronLayer clone = new NeuronLayer(neurons.length, neurons[0].weights.length,
+                                            neurons[0].linear);
         for (int i = 0; i < neurons.length; i++) {
             clone.neurons[i] = neurons[i].copy();
         }

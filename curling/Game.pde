@@ -9,7 +9,7 @@
 // Red throws first; teams alternate every shot until 8 total.
 // =============================================================
 
-static final int STONES_PER_TEAM = 2;
+static final int STONES_PER_TEAM = 3;
 static final int TOTAL_STONES    = STONES_PER_TEAM * 2;
 
 enum GameState { AIMING, SIMULATING, ENDED }

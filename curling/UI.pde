@@ -252,6 +252,7 @@ class UI {
   Button     trainBtn;
   Button     testBtn;
   Button     resetModelBtn;
+  Button     penaltyHeuristicBtn;
   Button     pinHeuristicBtn;
   Button     scoreHeuristicBtn;
   Slider     activeSlider;
@@ -345,9 +346,11 @@ class UI {
                              halfW, 36);
 
     float hx = ICE_W + 20;
-    float hw = (SIDEBAR_W - 40 - 6) * 0.5f;
-    pinHeuristicBtn   = new Button("Pin",   hx, HEURISTIC_BTN_Y, hw, HEURISTIC_BTN_H);
-    scoreHeuristicBtn = new Button("Score", hx + hw + 6, HEURISTIC_BTN_Y, hw, HEURISTIC_BTN_H);
+    float hgap = 4;
+    float hw = (SIDEBAR_W - 40 - hgap * 2) / 3.0f;
+    penaltyHeuristicBtn = new Button("Straff", hx,                    HEURISTIC_BTN_Y, hw, HEURISTIC_BTN_H);
+    pinHeuristicBtn     = new Button("Pin",    hx + hw + hgap,         HEURISTIC_BTN_Y, hw, HEURISTIC_BTN_H);
+    scoreHeuristicBtn   = new Button("Score",  hx + (hw + hgap) * 2,   HEURISTIC_BTN_Y, hw, HEURISTIC_BTN_H);
     lockPhase = PHASE_ANGLE;
   }
 
@@ -456,6 +459,7 @@ class UI {
 
   void drawHeuristicButtons() {
     boolean canPick = appMode != AppMode.TRAINING && appMode != AppMode.TEST;
+    drawHeuristicButton(penaltyHeuristicBtn, trainPenaltyEnabled, canPick);
     drawHeuristicButton(pinHeuristicBtn, trainPinEnabled, canPick);
     drawHeuristicButton(scoreHeuristicBtn, trainScoreEnabled, canPick);
   }
@@ -521,19 +525,33 @@ class UI {
   }
 
   String heuristicLabel() {
-    if (trainPinEnabled && trainScoreEnabled) return "Pin+Score";
-    if (trainPinEnabled)   return "Pin";
-    if (trainScoreEnabled) return "Score";
-    return "Pin";
+    String label = "";
+    if (trainPenaltyEnabled) label += (label.length() > 0 ? "+" : "") + "Straff";
+    if (trainPinEnabled)     label += (label.length() > 0 ? "+" : "") + "Pin";
+    if (trainScoreEnabled)   label += (label.length() > 0 ? "+" : "") + "Score";
+    return label.length() > 0 ? label : "Pin";
+  }
+
+  int enabledHeuristicCount() {
+    int n = 0;
+    if (trainPenaltyEnabled) n++;
+    if (trainPinEnabled)     n++;
+    if (trainScoreEnabled)   n++;
+    return n;
+  }
+
+  void togglePenaltyHeuristic() {
+    if (trainPenaltyEnabled && enabledHeuristicCount() <= 1) return;
+    trainPenaltyEnabled = !trainPenaltyEnabled;
   }
 
   void togglePinHeuristic() {
-    if (trainPinEnabled && !trainScoreEnabled) return; // keep at least one
+    if (trainPinEnabled && enabledHeuristicCount() <= 1) return;
     trainPinEnabled = !trainPinEnabled;
   }
 
   void toggleScoreHeuristic() {
-    if (trainScoreEnabled && !trainPinEnabled) return; // keep at least one
+    if (trainScoreEnabled && enabledHeuristicCount() <= 1) return;
     trainScoreEnabled = !trainScoreEnabled;
   }
 
@@ -671,6 +689,10 @@ class UI {
       return;
     }
     if (appMode != AppMode.TRAINING && appMode != AppMode.TEST) {
+      if (penaltyHeuristicBtn.hits(mx, my)) {
+        togglePenaltyHeuristic();
+        return;
+      }
       if (pinHeuristicBtn.hits(mx, my)) {
         togglePinHeuristic();
         return;
@@ -731,6 +753,7 @@ class UI {
     trainBtn.hover = trainBtn.hits(mx, my);
     testBtn.hover  = testBtn.hits(mx, my);
     resetModelBtn.hover = resetModelBtn.hits(mx, my);
+    penaltyHeuristicBtn.hover = penaltyHeuristicBtn.hits(mx, my);
     pinHeuristicBtn.hover = pinHeuristicBtn.hits(mx, my);
     scoreHeuristicBtn.hover = scoreHeuristicBtn.hits(mx, my);
   }

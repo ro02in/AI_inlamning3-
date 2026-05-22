@@ -1,24 +1,26 @@
 class NeuralPolicy {
     int inputSize = TOTAL_STONES * 4 + 2;
-    int hiddenSize = 32;
+    int hiddenSize = 12;
     int outputSize = 3;
 
     NeuronLayer hiddenLayer;
     NeuronLayer outputLayer;
 
     NeuralPolicy() {
-        hiddenLayer = new NeuronLayer(hiddenSize, inputSize);
-        outputLayer = new NeuronLayer(outputSize, hiddenSize);
+        hiddenLayer = new NeuronLayer(hiddenSize, inputSize, false);
+        outputLayer = new NeuronLayer(outputSize, hiddenSize, false); // tanh on both layers; output capped in predict
     }
 
     Shot predict(float[] state) {
         float[] hiddenOutputs = hiddenLayer.feedForward(state);
         float[] outputValues = outputLayer.feedForward(hiddenOutputs);
 
-        float MIN_SPEED = UI.SPEED_MAX * 0.3f; // Minimum speed to prevent all shots from being too soft
+        // All three outputs are tanh → [-1, 1].
+        // curl stays as-is; speed maps [-1,1] → [MIN,MAX]; angle maps to ±10°.
+        float MIN_SPEED = UI.SPEED_MAX * 0.2f;
 
-        float curl = outputValues[0];
-        float speed = MIN_SPEED + ((outputValues[1] + 1) / 2) * (UI.SPEED_MAX - MIN_SPEED);
+        float curl  = outputValues[0];
+        float speed = MIN_SPEED + ((outputValues[1] + 1) / 2.0) * (UI.SPEED_MAX - MIN_SPEED);
         float angle = outputValues[2] * PI / 18;
         return new Shot(curl, speed, angle);
     }
@@ -26,6 +28,25 @@ class NeuralPolicy {
     void mutate(float mutationRate, float mutationStrength) {
         hiddenLayer.mutate(mutationRate, mutationStrength);
         outputLayer.mutate(mutationRate, mutationStrength);
+    }
+
+    void clipWeights() {
+        hiddenLayer.clipAll();
+        outputLayer.clipAll();
+    }
+
+    // Sum of all squared weights and biases. Used as L2 regularisation penalty.
+    float weightL2() {
+        float sum = 0;
+        for (Neuron n : hiddenLayer.neurons) {
+            for (float w : n.weights) sum += w * w;
+            sum += n.bias * n.bias;
+        }
+        for (Neuron n : outputLayer.neurons) {
+            for (float w : n.weights) sum += w * w;
+            sum += n.bias * n.bias;
+        }
+        return sum;
     }
 
     NeuralPolicy copy() {
@@ -46,9 +67,10 @@ class NeuralPolicy {
                 state[i++] = s.team == TEAM_RED ? 1 : 0;
                 state[i++] = 1; // 1 = existing stone
             } else {
-                state[i++] = 2;
-                state[i++] = 2;
-                state[i++] = slot % 2 == 0 ? lastStoneTeam : (lastStoneTeam == TEAM_RED ? TEAM_YELLOW : TEAM_RED); // which team would throw here if there were a stone
+                state[i++] = 0;
+                state[i++] = 0;
+                int throwTeam = (slot % 2 == 0) ? TEAM_RED : TEAM_YELLOW;
+                state[i++] = throwTeam == TEAM_RED ? 1 : 0;
                 state[i++] = -1;
             }
         }

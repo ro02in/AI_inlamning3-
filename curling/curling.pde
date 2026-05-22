@@ -41,12 +41,15 @@ boolean DEBUG = false;
 enum AppMode { PLAY, TRAINING, TEST }
 
 AppMode appMode = AppMode.PLAY;
-boolean trainPinEnabled   = true;
-boolean trainScoreEnabled = false;
+boolean trainPenaltyEnabled = false;
+boolean trainPinEnabled     = true;
+boolean trainScoreEnabled   = false;
 PolicySearchTraining trainer;
 NeuralPolicy aiPolicy;
 ScoreHeuristic scoreHeuristic;
 CloseToButtonHeuristic pinHeuristic;
+PenaltyHeuristic penaltyHeuristic;
+TrainingPreview    trainingPreview;
 
 int  trainingTarget = 100;
 int  trainingDone   = 0;
@@ -84,15 +87,18 @@ void setup() {
   game    = new Game();
 
   trainer       = new PolicySearchTraining();
-  scoreHeuristic = new ScoreHeuristic();
-  pinHeuristic   = new CloseToButtonHeuristic();
-  aiPolicy      = trainer.current.copy();
+  scoreHeuristic   = new ScoreHeuristic();
+  pinHeuristic     = new CloseToButtonHeuristic();
+  penaltyHeuristic = new PenaltyHeuristic();
+  trainingPreview  = new TrainingPreview();
+  aiPolicy         = trainer.current.copy();
 }
 
 ArrayList<Heuristic> activeTrainingHeuristics() {
   ArrayList<Heuristic> heuristics = new ArrayList<Heuristic>();
-  if (trainPinEnabled)   heuristics.add(pinHeuristic);
-  if (trainScoreEnabled) heuristics.add(scoreHeuristic);
+  if (trainPenaltyEnabled) heuristics.add(penaltyHeuristic);
+  if (trainPinEnabled)     heuristics.add(pinHeuristic);
+  if (trainScoreEnabled)   heuristics.add(scoreHeuristic);
   if (heuristics.isEmpty()) heuristics.add(pinHeuristic); // safety: at least one
   return heuristics;
 }
@@ -100,15 +106,20 @@ ArrayList<Heuristic> activeTrainingHeuristics() {
 void draw() {
   background(20);
 
-  if (appMode == AppMode.TRAINING && trainingActive) {
-    trainer.comparePolicies(activeTrainingHeuristics());
-    trainingDone++;
-    if (trainingDone >= trainingTarget) {
-      trainingActive = false;
-      appMode = AppMode.PLAY;
-      aiPolicy = trainer.current.copy();
-      trainingStatus = "Klar! (" + trainingDone + " jamf.)";
+  if (appMode == AppMode.TRAINING) {
+    if (trainingActive) {
+      trainer.comparePolicies(activeTrainingHeuristics());
+      trainingDone++;
+      trainingPreview.recordSnapshot(trainingDone, trainer.current);
+      if (trainingDone >= trainingTarget) {
+        trainingActive = false;
+        appMode = AppMode.PLAY;
+        aiPolicy = trainer.current.copy();
+        trainingStatus = "Klar! (" + trainingDone + " jamf.)";
+        trainingPreview.reset();
+      }
     }
+    trainingPreview.update(DT);
   } else if (appMode == AppMode.TEST) {
     updateAiTest();
     ui.update(DT);
@@ -124,6 +135,8 @@ void draw() {
     if (aiTestLastShot != null) drawShotPreview(aiTestLastShot, color(235, 205, 60));
     for (Stone s : aiTestStones) s.draw();
     drawAiTestOverlay();
+  } else if (appMode == AppMode.TRAINING) {
+    trainingPreview.drawStones();
   } else {
     if (game.state == GameState.AIMING && game.currentTeam == TEAM_RED) {
       drawAimPreview(ui.intendedShot());
@@ -135,13 +148,14 @@ void draw() {
 
   drawSidebarBackdrop();
   ui.draw();
-  if (appMode == AppMode.TRAINING) drawTrainingOverlay();
+  if (appMode == AppMode.TRAINING) trainingPreview.drawOverlay(trainingDone, trainingTarget);
 }
 void startTraining(int comparisons) {
   if (trainingActive) return;
   trainingTarget = trainingDone + comparisons;
   trainingActive = true;
   trainingStatus = "";
+  trainingPreview.reset();
   appMode        = AppMode.TRAINING;
 }
 
@@ -151,6 +165,7 @@ void cancelTraining() {
   appMode        = AppMode.PLAY;
   aiPolicy       = trainer.current.copy();
   trainingStatus = "Avbruten (" + trainingDone + " jamf.)";
+  trainingPreview.reset();
 }
 
 void resetTrainingModel() {
@@ -255,23 +270,6 @@ void drawAiTestOverlay() {
   textSize(13);
   text("Serie: Rod " + testHumanWins + " - " + testAiWins + " Gul  ("
        + testGamesPlayed + ")", ICE_W * 0.5, ICE_H * 0.5 + 42);
-  popStyle();
-}
-
-void drawTrainingOverlay() {
-  pushStyle();
-  fill(0, 180);
-  noStroke();
-  rect(0, ICE_H * 0.5 - 50, ICE_W, 100);
-  fill(240);
-  textAlign(CENTER, CENTER);
-  textSize(22);
-  text("Tr\u00e4nar...", ICE_W * 0.5, ICE_H * 0.5 - 12);
-  textSize(16);
-  text(trainingDone + " / " + trainingTarget, ICE_W * 0.5, ICE_H * 0.5 + 10);
-  textSize(13);
-  fill(200);
-  text("Avbryt med knappen i sidopanelen", ICE_W * 0.5, ICE_H * 0.5 + 32);
   popStyle();
 }
 

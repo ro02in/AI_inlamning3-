@@ -1,15 +1,19 @@
 class PolicySearchTraining {
     NeuralPolicy current;
-    int   mutationsPerComparison = 3;
+    int   mutationsPerComparison = 5;
     float amountChallengeSet = 0.5; // 0..1, fraction of shots drawn from the fixed challenge set
-    float mutationRate       = 0.1;
-    float mutationStrength   = 0.07;
+    float mutationRate       = 0.08;
+    float mutationStrength   = 0.04;
+    // L2 penalty per comparison: subtracted from each policy's score proportional to sum(w^2).
+    // Prevents weights drifting to the clip ceiling. Raise if saturation still grows; lower if model stops improving.
+    float weightDecay        = 0.02;
     ArrayList<Stone>   stones = new ArrayList<Stone>();
     ArrayList<Stone>[] challengeSet;
     int challengeSetSize  = 0;
     int challengeSetIndex = 0;
 
     RandomState randomState = new RandomState();
+    ShotSimilarityPenalty shotSimilarity = new ShotSimilarityPenalty();
 
     PolicySearchTraining() {
         current = new NeuralPolicy();
@@ -59,10 +63,13 @@ class PolicySearchTraining {
 
         NeuralPolicy[] candidates = new NeuralPolicy[mutationsPerComparison];
         float[]        candidateScores = new float[mutationsPerComparison];
+        ArrayList<Shot>  currentShots = new ArrayList<Shot>();
+        ArrayList<Shot>[] candidateShots = new ArrayList[mutationsPerComparison];
         for (int m = 0; m < mutationsPerComparison; m++) {
             candidates[m] = current.copy();
             candidates[m].mutate(mutationRate, mutationStrength);
             candidateScores[m] = 0;
+            candidateShots[m] = new ArrayList<Shot>();
         }
 
         float currentScore = 0;
@@ -79,6 +86,7 @@ class PolicySearchTraining {
             // Simulate once per policy, then score cheaply with every heuristic.
             ShotResult currentResult = heuristics.get(0).simulate(current, state, stones);
             float layoutScore = combinedScore(heuristics, currentResult);
+            currentShots.add(currentResult.plannedShot);
 
             if (layoutScore < 0) {
                 challengeSet[challengeSetIndex] = copyLayout(stones);
@@ -89,6 +97,7 @@ class PolicySearchTraining {
             for (int m = 0; m < mutationsPerComparison; m++) {
                 ShotResult cr = heuristics.get(0).simulate(candidates[m], state, stones);
                 candidateScores[m] += combinedScore(heuristics, cr);
+                candidateShots[m].add(cr.plannedShot);
             }
         }
 
@@ -98,19 +107,33 @@ class PolicySearchTraining {
             float[] state = current.convertState(layout, 1, TEAM_RED);
 
             ShotResult currentResult = heuristics.get(0).simulate(current, state, layout);
-            currentScore += combinedScore(heuristics, currentResult);
+            float currentLayoutScore = combinedScore(heuristics, currentResult);
+            currentShots.add(currentResult.plannedShot);
+            if (currentLayoutScore > 0) currentLayoutScore *= 2;
+            currentScore += currentLayoutScore;
 
             for (int m = 0; m < mutationsPerComparison; m++) {
                 ShotResult cr = heuristics.get(0).simulate(candidates[m], state, layout);
                 float score = combinedScore(heuristics, cr);
-                if (score > 0) {
-                    score *= 2; // double reward for doing well on challenge shots, to encourage learning them
-                }
+                candidateShots[m].add(cr.plannedShot);
+                if (score > 0) score *= 2;
                 candidateScores[m] += score;
             }
         }
 
-        // Keep best candidate if it beats current (unchanged from before).
+        // Penalise firing the same curl/angle (same direction) on every layout.
+        currentScore -= shotSimilarity.penalty(currentShots);
+        for (int m = 0; m < mutationsPerComparison; m++) {
+            candidateScores[m] -= shotSimilarity.penalty(candidateShots[m]);
+        }
+
+        // Apply L2 weight penalty once per comparison to discourage weight growth.
+        currentScore -= weightDecay * current.weightL2();
+        for (int m = 0; m < mutationsPerComparison; m++) {
+            candidateScores[m] -= weightDecay * candidates[m].weightL2();
+        }
+
+        // Keep best candidate if it beats current.
         int bestIdx = -1;
         float bestScore = currentScore;
         for (int m = 0; m < mutationsPerComparison; m++) {
@@ -122,5 +145,6 @@ class PolicySearchTraining {
         if (bestIdx >= 0) {
             current = candidates[bestIdx].copy();
         }
+        current.clipWeights();
     }
 }

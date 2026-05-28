@@ -44,12 +44,24 @@ AppMode appMode = AppMode.PLAY;
 boolean trainPenaltyEnabled = false;
 boolean trainPinEnabled     = true;
 boolean trainScoreEnabled   = false;
+
+// Model-type and algorithm selectors (toggled from UI).
+boolean useEnsemble  = true;   // true = ExpertEnsemble; false = single NeuralPolicy
+boolean useGradients = false;  // true = PolicyGradient; false = PolicySearch
+
 ExpertEnsemble ensemble;
+GradientEnsemble gradientEnsemble;
+// Single-model policy search trainer (useEnsemble=false, useGradients=false).
+PolicySearchTraining singleTrainer;
+// Policy gradient trainer (useGradients=true, useEnsemble=false).
+PolicyGradientTraining pgTrainer;
+
 ScoreHeuristic scoreHeuristic;
 CloseToButtonHeuristic pinHeuristic;
 PenaltyHeuristic penaltyHeuristic;
 ExpertShotHeuristic expertHeuristic;
 TrainingPreview    trainingPreview;
+PolicyDiagnostics  policyDiagnostics;
 
 int  trainingTarget = 100;
 int  trainingDone   = 0;
@@ -91,17 +103,81 @@ void setup() {
   game    = new Game();
 
   ensemble         = new ExpertEnsemble();
+  gradientEnsemble = new GradientEnsemble();
+  singleTrainer    = new PolicySearchTraining();
+  pgTrainer        = new PolicyGradientTraining();
   scoreHeuristic   = new ScoreHeuristic();
   pinHeuristic     = new CloseToButtonHeuristic();
   penaltyHeuristic = new PenaltyHeuristic();
   expertHeuristic  = new ExpertShotHeuristic();
   trainingPreview  = new TrainingPreview();
+  policyDiagnostics = new PolicyDiagnostics();
   expertShots      = new ExpertShotDataset();
+}
+
+// Returns a representative NeuralPolicy from whichever model is currently active.
+NeuralPolicy activePolicy() {
+  if (useGradients) {
+    return useEnsemble ? gradientEnsemble.anyPolicy() : pgTrainer.policy;
+  }
+  if (useEnsemble) return ensemble.anyPolicy();
+  return singleTrainer.current;
+}
+
+// Dispatch inference: pick the best shot from the active model.
+Shot bestShotActive(ArrayList<Stone> layout, int stonesLeft, int lastTeam,
+                    Heuristic scorer, boolean logScores) {
+  if (useGradients) {
+    if (useEnsemble) {
+      return gradientEnsemble.bestShot(layout, stonesLeft, lastTeam, scorer, logScores);
+    }
+    float[] state = pgTrainer.policy.convertState(layout, stonesLeft, lastTeam);
+    Shot shot = pgTrainer.policy.predictMean(state);
+    if (logScores) {
+      policyDiagnostics.logGradientInference(pgTrainer.policy, layout,
+                                             stonesLeft, lastTeam, scorer);
+    }
+    return shot;
+  }
+  if (useEnsemble) {
+    return ensemble.bestShot(layout, stonesLeft, lastTeam, scorer, logScores);
+  }
+  // Single policy-search model: predict directly (no ensemble competition).
+  float[] state = singleTrainer.current.convertState(layout, stonesLeft, lastTeam);
+  return singleTrainer.current.predict(state);
+}
+
+// Reset whichever trainer is currently selected.
+void resetActiveTrainer() {
+  if (useGradients) {
+    if (useEnsemble) gradientEnsemble.reset();
+    else pgTrainer.reset();
+  } else if (useEnsemble) {
+    ensemble.reset();
+  } else {
+    singleTrainer.reset();
+  }
+}
+
+// Switch use-ensemble flag and reset the newly selected trainer.
+void setUseEnsemble(boolean val) {
+  if (useEnsemble == val) return;
+  useEnsemble = val;
+  trainingDone = 0;
+  trainingStatus = "Ny modell";
+}
+
+// Switch algorithm flag and reset the newly selected trainer.
+void setUseGradients(boolean val) {
+  if (useGradients == val) return;
+  useGradients = val;
+  trainingDone = 0;
+  trainingStatus = "Ny modell";
 }
 
 void applyRecordPolicySliders() {
   if (recordSession == null) return;
-  NeuralPolicy p = ensemble.anyPolicy();
+  NeuralPolicy p = activePolicy();
   float[] state = p.convertState(recordSession.layoutSnapshot, 1, TEAM_RED);
   ui.setSlidersFromShot(p.predict(state));
 }
@@ -150,19 +226,27 @@ void draw() {
 
   if (appMode == AppMode.TRAINING) {
     if (trainingActive) {
-      ensemble.trainAll(
-        activeTrainingHeuristics(),
-        ui.shotsPerPrediction,
-        expertHeuristic,
-        ui.expertShotsPerPrediction,
-        expertShots
-      );
+      ArrayList<Heuristic> heuristics = activeTrainingHeuristics();
+      if (useGradients) {
+        if (useEnsemble) {
+          gradientEnsemble.trainAll(heuristics, ui.shotsPerPrediction);
+        } else {
+          pgTrainer.shotsPerUpdate = ui.shotsPerPrediction;
+          pgTrainer.updateStep(heuristics);
+        }
+      } else if (useEnsemble) {
+        ensemble.trainAll(heuristics, ui.shotsPerPrediction,
+                          expertHeuristic, ui.expertShotsPerPrediction, expertShots);
+      } else {
+        singleTrainer.comparePolicies(heuristics, ui.shotsPerPrediction,
+                                      expertHeuristic, ui.expertShotsPerPrediction, expertShots);
+      }
       trainingDone++;
-      trainingPreview.recordSnapshot(trainingDone, ensemble.anyPolicy());
+      trainingPreview.recordSnapshot(trainingDone, activePolicy());
       if (trainingDone >= trainingTarget) {
         trainingActive = false;
         appMode = AppMode.PLAY;
-        trainingStatus = "Klar! (" + trainingDone + " jamf.)";
+        trainingStatus = "Klar! (" + trainingDone + " steg)";
         trainingPreview.reset();
       }
     }
@@ -226,7 +310,7 @@ void cancelTraining() {
 
 void resetTrainingModel() {
   if (trainingActive) return;
-  ensemble.reset();
+  resetActiveTrainer();
   trainingDone   = 0;
   trainingTarget = 0;
   trainingStatus = "Ny modell";
@@ -257,7 +341,7 @@ void runAiTestSim() {
   Heuristic scorer = activeTrainingHeuristics().isEmpty()
                    ? pinHeuristic
                    : activeTrainingHeuristics().get(0);
-  aiTestLastShot = ensemble.bestShot(aiTestStones, 1, TEAM_RED, scorer, true);
+  aiTestLastShot = bestShotActive(aiTestStones, 1, TEAM_RED, scorer, true);
 
   PVector h = sheet.hackWorld();
   Stone fired = new Stone(h.x, h.y, TEAM_YELLOW);
@@ -425,8 +509,8 @@ void maybeAiShoot() {
   Heuristic scorer = activeTrainingHeuristics().isEmpty()
                    ? pinHeuristic
                    : activeTrainingHeuristics().get(0);
-  Shot shot = ensemble.bestShot(game.stones, game.stonesRemaining(TEAM_YELLOW),
-                                lastTeam, scorer, false);
+  Shot shot = bestShotActive(game.stones, game.stonesRemaining(TEAM_YELLOW),
+                             lastTeam, scorer, false);
   game.fire(shot);
 }
 

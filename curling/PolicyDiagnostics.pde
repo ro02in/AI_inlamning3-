@@ -23,6 +23,113 @@ class PolicyDiagnostics {
     println("=========================================");
   }
 
+  // One expert line for PG inference (matches policy-search ensemble format).
+  void logGradientExpertLine(String name, NeuralPolicy policy,
+                             float[] hidden, float[] means, float[] logStds,
+                             Shot shot, float score,
+                             float satPct, float deadPct, float outSatPct) {
+    String inactiveStr = (policy.HIDDEN_ACTIVATION == ActivationKind.RELU)
+        ? "  inactive=" + nf(deadPct, 0, 1) + "%"
+        : "";
+    String outSatStr = (policy.OUTPUT_ACTIVATION == ActivationKind.TANH)
+        ? "  outSat=" + nf(outSatPct, 0, 1) + "%"
+        : "";
+    String sigmaStr = "";
+    if (policy.meanAndStd && logStds != null) {
+      float ls0 = constrain(logStds[0], NeuralPolicy.LOG_STD_MIN, NeuralPolicy.LOG_STD_MAX);
+      float ls1 = constrain(logStds[1], NeuralPolicy.LOG_STD_MIN, NeuralPolicy.LOG_STD_MAX);
+      float ls2 = constrain(logStds[2], NeuralPolicy.LOG_STD_MIN, NeuralPolicy.LOG_STD_MAX);
+      sigmaStr = "  σ=" + nf(exp(ls0), 0, 3) + "/" + nf(exp(ls1), 0, 3)
+               + "/" + nf(exp(ls2), 0, 3);
+    }
+    println("  " + name
+            + "  curl=" + nf(shot.curl, 0, 3)
+            + "  spd=" + nf(shot.speed, 0, 1)
+            + "  ang=" + nf(degrees(shot.angle), 0, 1) + "deg"
+            + "  hSat=" + nf(satPct, 0, 1) + "%"
+            + inactiveStr
+            + outSatStr
+            + sigmaStr
+            + "  score=" + nf(score, 0, 4));
+  }
+
+  // Inference diagnostics for a single meanAndStd policy (test / play with logScores=true).
+  void logGradientInference(NeuralPolicy policy, ArrayList<Stone> layout,
+                            int stonesLeft, int lastStoneTeam, Heuristic scorer) {
+    if (policy == null || layout == null || !policy.meanAndStd) return;
+
+    float[] state   = policy.convertState(layout, stonesLeft, lastStoneTeam);
+    float[] hidden  = policy.hiddenLayer.feedForward(state);
+    float[] means   = policy.outputLayer.feedForward(hidden);
+    float[] logStds = policy.outputLogStd.feedForward(hidden);
+    Shot shot = policy.predictMean(state);
+
+    float score = 0;
+    if (scorer != null) {
+      ShotResult result = scorer.simulate(policy, state, layout, null);
+      score = scorer.scoreResult(result);
+    }
+
+    float[] health = hiddenHealthPcts(hidden, policy.HIDDEN_ACTIVATION);
+    float outSatPct = outputSaturationPct(means, policy.OUTPUT_ACTIVATION);
+
+    println("--- PG expert scores ---");
+    logGradientExpertLine("Enkel", policy, hidden, means, logStds, shot, score,
+                          health[0], health[1], outSatPct);
+    println("Chosen shot: Enkel"
+            + "  score=" + nf(score, 0, 3)
+            + "  curl=" + nf(shot.curl, 0, 3)
+            + "  spd=" + nf(shot.speed, 0, 1)
+            + "  ang=" + nf(degrees(shot.angle), 0, 1) + "deg");
+  }
+
+  // Periodic training diagnostics (printed every N update steps).
+  void logGradientTrainingStep(String expertLabel, NeuralPolicy policy, float[] hidden,
+                               int step, float meanReward, float maxReward, float minReward,
+                               int eliteCount, float advSum, boolean skipped,
+                               float[] means, float[] sigmas, float[] gradMean, float[] gradLogStd) {
+    String prefix = expertLabel.length() > 0 ? ("[" + expertLabel + "] ") : "";
+    float satPct = 0, deadPct = 0, outSatPct = 0;
+    if (policy != null && hidden != null) {
+      float[] health = hiddenHealthPcts(hidden, policy.HIDDEN_ACTIVATION);
+      satPct = health[0];
+      deadPct = health[1];
+      if (means != null) {
+        outSatPct = outputSaturationPct(means, policy.OUTPUT_ACTIVATION);
+      }
+    }
+    String healthStr = "  hSat=" + nf(satPct, 0, 1) + "%"
+                     + "  inactive=" + nf(deadPct, 0, 1) + "%"
+                     + "  outSat=" + nf(outSatPct, 0, 1) + "%";
+
+    println("--- PG train step " + step + " " + prefix + "---");
+    if (skipped) {
+      println("  skipped (all elites below baseline)" + healthStr);
+      println("  reward mean=" + nf(meanReward, 0, 3)
+              + "  max=" + nf(maxReward, 0, 3)
+              + "  min=" + nf(minReward, 0, 3));
+      return;
+    }
+    println("  reward mean=" + nf(meanReward, 0, 3)
+            + "  max=" + nf(maxReward, 0, 3)
+            + "  min=" + nf(minReward, 0, 3)
+            + "  elites=" + eliteCount
+            + "  advSum=" + nf(advSum, 0, 3)
+            + healthStr);
+    println("  μ tanh: curl=" + nf(means[0], 0, 3)
+            + "  speed=" + nf(means[1], 0, 3)
+            + "  angle=" + nf(means[2], 0, 3));
+    println("  σ: curl=" + nf(sigmas[0], 0, 4)
+            + "  speed=" + nf(sigmas[1], 0, 4)
+            + "  angle=" + nf(sigmas[2], 0, 4));
+    println("  grad μ: curl=" + nf(gradMean[0], 0, 4)
+            + "  speed=" + nf(gradMean[1], 0, 4)
+            + "  angle=" + nf(gradMean[2], 0, 4));
+    println("  grad logσ: curl=" + nf(gradLogStd[0], 0, 4)
+            + "  speed=" + nf(gradLogStd[1], 0, 4)
+            + "  angle=" + nf(gradLogStd[2], 0, 4));
+  }
+
   void logLayout(ArrayList<Stone> layout) {
     println("-- layout (" + layout.size() + " stones) --");
     for (int i = 0; i < layout.size(); i++) {

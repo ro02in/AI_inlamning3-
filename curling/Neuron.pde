@@ -52,6 +52,20 @@ class Neuron {
         }
     }
 
+    // Derivative of the activation function at a given pre-activation value z.
+    // Used during backpropagation: dL/dz = dL/da * da/dz.
+    float activationDerivative(float z) {
+        switch (activation) {
+            case TANH: {
+                float t = (float) Math.tanh(z);
+                return 1.0f - t * t;
+            }
+            case RELU:   return z > 0 ? 1.0f : RELU_LEAK;
+            case LINEAR: return 1.0f;
+            default:     return 1.0f;
+        }
+    }
+
     void mutate(float mutationRate, float mutationStrength) {
         for (int i = 0; i < weights.length; i++) {
             if (random(1) < mutationRate) {

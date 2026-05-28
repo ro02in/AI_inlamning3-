@@ -266,6 +266,12 @@ class UI {
   Button     expertShotsPlusBtn;
   Button     noiseMinusBtn;
   Button     noisePlusBtn;
+  // Model-type toggle: Ensemble vs single model.
+  Button     ensembleModeBtn;
+  Button     singleModeBtn;
+  // Algorithm toggle: Policy Search vs Policy Gradients.
+  Button     policySearchBtn;
+  Button     policyGradBtn;
   Slider     activeSlider;
 
   int        trainComparisons = 100;
@@ -303,6 +309,8 @@ class UI {
   final float TRAIN_BTN_TOP    = 794;
   final float EXTRA_BTN_TOP    = 840;
   final float DATASET_BTN_TOP  = 882;
+  final float MODEL_BTN_TOP    = 922;  // Ensemble | Enkel toggle row
+  final float ALGO_BTN_TOP     = 942;  // Sökning  | Gradient toggle row
   final float EXPERT_BTN_TOP   = TRAIN_BTN_TOP;
 
   // ----- Lock-bar tunables (adjust to taste) -----------------
@@ -363,6 +371,12 @@ class UI {
                             halfX,
                             DATASET_BTN_TOP,
                             btnW, 36);
+
+    float toggleHalfW = (btnW - 6) * 0.5f;
+    ensembleModeBtn = new Button("Ensemble", halfX,                  MODEL_BTN_TOP, toggleHalfW, 18);
+    singleModeBtn   = new Button("Enkel",    halfX + toggleHalfW + 6, MODEL_BTN_TOP, toggleHalfW, 18);
+    policySearchBtn = new Button("S\u00f6kning",  halfX,                  ALGO_BTN_TOP, toggleHalfW, 18);
+    policyGradBtn   = new Button("Gradient", halfX + toggleHalfW + 6, ALGO_BTN_TOP, toggleHalfW, 18);
 
     float expertGap = 6;
     float expertThirdW = (btnW - expertGap * 2) / 3.0f;
@@ -545,6 +559,17 @@ class UI {
 
     rndStateBtn.enabled = controlsEnabled && appMode == AppMode.PLAY;
     rndStateBtn.draw();
+
+    // Model-type and algorithm toggles.
+    boolean canToggleMode = controlsEnabled && appMode != AppMode.TEST;
+    ensembleModeBtn.enabled = canToggleMode;
+    singleModeBtn.enabled   = canToggleMode;
+    policySearchBtn.enabled = canToggleMode;
+    policyGradBtn.enabled   = canToggleMode;
+    drawHeuristicButton(ensembleModeBtn, useEnsemble,   canToggleMode);
+    drawHeuristicButton(singleModeBtn,  !useEnsemble,  canToggleMode);
+    drawHeuristicButton(policySearchBtn, !useGradients, canToggleMode);
+    drawHeuristicButton(policyGradBtn,    useGradients, canToggleMode);
   }
 
   void drawHeuristicButtons() {
@@ -553,7 +578,8 @@ class UI {
     drawHeuristicButton(penaltyHeuristicBtn, trainPenaltyEnabled, canPick);
     drawHeuristicButton(pinHeuristicBtn, trainPinEnabled, canPick);
     drawHeuristicButton(scoreHeuristicBtn, trainScoreEnabled, canPick);
-    drawHeuristicButton(noiseHeuristicBtn, ensemble.trainers[0].explorationNoise.enabled, canPick);
+    boolean noiseOn = !useGradients && ensemble.trainers[0].explorationNoise.enabled;
+    drawHeuristicButton(noiseHeuristicBtn, noiseOn, canPick && !useGradients);
   }
 
   void drawHeuristicButton(Button btn, boolean selected, boolean enabled) {
@@ -603,33 +629,43 @@ class UI {
     textAlign(LEFT, TOP);
     textSize(9);
     text("Shots/pred: " + shotsPerPrediction, left, 124);
-    text("Expert/pred: " + expertShotsPerPrediction, left, 138);
-    String brusLabel = ensemble.trainers[0].explorationNoise.enabled ? "på" : "av";
-    text("Brus " + brusLabel + " x" + nf(ensemble.trainers[0].explorationNoise.strength, 0, 1),
-         left, 152);
+    if (useGradients) {
+      text("Entropy: " + nf(pgTrainer.entropyBonus, 0, 3), left, 138);
+      text("LR: " + nf(pgTrainer.learningRate, 0, 4), left, 152);
+    } else {
+      text("Expert/pred: " + expertShotsPerPrediction, left, 138);
+      String brusLabel = ensemble.trainers[0].explorationNoise.enabled ? "p\u00e5" : "av";
+      text("Brus " + brusLabel + " x" + nf(ensemble.trainers[0].explorationNoise.strength, 0, 1),
+           left, 152);
+    }
 
     boolean canTuneCounts = appMode != AppMode.RECORD;
+    boolean showPsControls = canTuneCounts && !useGradients;
     simShotsMinusBtn.enabled = canTuneCounts;
     simShotsPlusBtn.enabled = canTuneCounts;
-    expertShotsMinusBtn.enabled = canTuneCounts;
-    expertShotsPlusBtn.enabled = canTuneCounts;
-    noiseMinusBtn.enabled = canTuneCounts;
-    noisePlusBtn.enabled = canTuneCounts;
+    expertShotsMinusBtn.enabled = showPsControls;
+    expertShotsPlusBtn.enabled = showPsControls;
+    noiseMinusBtn.enabled = showPsControls;
+    noisePlusBtn.enabled = showPsControls;
     simShotsMinusBtn.draw();
     simShotsPlusBtn.draw();
-    expertShotsMinusBtn.draw();
-    expertShotsPlusBtn.draw();
-    noiseMinusBtn.draw();
-    noisePlusBtn.draw();
+    if (!useGradients) {
+      expertShotsMinusBtn.draw();
+      expertShotsPlusBtn.draw();
+      noiseMinusBtn.draw();
+      noisePlusBtn.draw();
+    }
 
     fill(200);
     textAlign(LEFT, TOP);
     textSize(9);
+    String algoTag = useGradients ? "PG" : heuristicLabel();
+    String modelTag = useEnsemble ? "ens" : "enkel";
     if (appMode == AppMode.TRAINING) {
       text("Traning: " + trainingDone + " / " + trainingTarget
-           + "  (" + heuristicLabel() + ")", left, AI_STATUS_Y);
+           + "  (" + algoTag + ", " + modelTag + ")", left, AI_STATUS_Y);
     } else if (trainingStatus.length() > 0) {
-      text(trainingStatus + "  (" + heuristicLabel() + ")", left, AI_STATUS_Y);
+      text(trainingStatus + "  (" + algoTag + ", " + modelTag + ")", left, AI_STATUS_Y);
     } else if (appMode == AppMode.TEST) {
       text("Test: Rod " + testHumanWins + "  Gul " + testAiWins
            + "  (" + testGamesPlayed + " sim)", left, AI_STATUS_Y);
@@ -637,7 +673,7 @@ class UI {
       int n = expertShots != null ? expertShots.count() : 0;
       text("Dataset: " + n + " rader  |  " + expertShots.csvPath, left, AI_STATUS_Y);
     } else {
-      text("Heuristik: " + heuristicLabel() + "  |  " + trainingDone + " jamf.", left, AI_STATUS_Y);
+      text("[" + algoTag + ", " + modelTag + "]  " + trainingDone + " steg", left, AI_STATUS_Y);
     }
     popStyle();
   }
@@ -950,6 +986,23 @@ class UI {
       return;
     }
 
+    if (ensembleModeBtn.enabled && ensembleModeBtn.hits(mx, my)) {
+      setUseEnsemble(true);
+      return;
+    }
+    if (singleModeBtn.enabled && singleModeBtn.hits(mx, my)) {
+      setUseEnsemble(false);
+      return;
+    }
+    if (policySearchBtn.enabled && policySearchBtn.hits(mx, my)) {
+      setUseGradients(false);
+      return;
+    }
+    if (policyGradBtn.enabled && policyGradBtn.hits(mx, my)) {
+      setUseGradients(true);
+      return;
+    }
+
     activeSlider = null;
     if (appMode == AppMode.TRAINING || appMode == AppMode.TEST) return;
     if      (curlSlider .trackHit(mx, my)) activeSlider = curlSlider;
@@ -994,5 +1047,9 @@ class UI {
     penaltyHeuristicBtn.hover = penaltyHeuristicBtn.hits(mx, my);
     pinHeuristicBtn.hover = pinHeuristicBtn.hits(mx, my);
     scoreHeuristicBtn.hover = scoreHeuristicBtn.hits(mx, my);
+    ensembleModeBtn.hover = ensembleModeBtn.hits(mx, my);
+    singleModeBtn.hover   = singleModeBtn.hits(mx, my);
+    policySearchBtn.hover = policySearchBtn.hits(mx, my);
+    policyGradBtn.hover   = policyGradBtn.hits(mx, my);
   }
 }

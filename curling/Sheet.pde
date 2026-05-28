@@ -159,9 +159,6 @@ class Sheet {
     ellipse(tcx, tcy, worldLenToScreen(HOUSE_8_R_FT * 2), worldLenToScreen(HOUSE_8_R_FT * 2));
     stroke(200, 70, 70);
     ellipse(tcx, tcy, worldLenToScreen(HOUSE_4_R_FT * 2), worldLenToScreen(HOUSE_4_R_FT * 2));
-    fill(250, 252, 255);
-    noStroke();
-    ellipse(tcx, tcy, worldLenToScreen(BUTTON_R_FT * 2), worldLenToScreen(BUTTON_R_FT * 2));
 
     stroke(70, 85, 105);
     strokeWeight(max(1.5, pxPerFt * 0.06));

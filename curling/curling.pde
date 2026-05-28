@@ -34,35 +34,38 @@ UI      ui;
 // Fixed simulation timestep (seconds). Drives Physics.step.
 final float DT = 1.0 / 60.0;
 
-// Toggle with 'd' to show tee and hack markers.
+// Toggle with 'd' to show hack debug marker.
 boolean DEBUG = false;
 
 // ----- AI training / test ------------------------------------
 enum AppMode { PLAY, TRAINING, TEST, RECORD }
 
 AppMode appMode = AppMode.PLAY;
-boolean trainPenaltyEnabled = false;
-boolean trainPinEnabled     = true;
-boolean trainScoreEnabled   = false;
 
-// Model-type and algorithm selectors (toggled from UI).
-boolean useEnsemble  = true;   // true = ExpertEnsemble; false = single NeuralPolicy
-boolean useGradients = false;  // true = PolicyGradient; false = PolicySearch
+// ----- Backend training constants (edit here to tune) --------
+final int   SHOTS_PER_ROUND    = 50;    // shots sampled per expert per update
+final int   CURRICULUM_STEP    = 500;   // training steps before adding another stone depth
+final int   ROLLOUT_DEPTH_CAP  = 8;     // max rollout depth (TOTAL_STONES = full game)
+final float SELECTOR_ENTROPY   = 0.02f; // entropy bonus for shot-type selector
+final float SELECTOR_TEMP      = 1.0f;  // temperature for reward->target softmax
+final float SELECTOR_LR        = 0.001f;// selector network learning rate
 
-ExpertEnsemble ensemble;
 GradientEnsemble gradientEnsemble;
-// Single-model policy search trainer (useEnsemble=false, useGradients=false).
-PolicySearchTraining singleTrainer;
-// Policy gradient trainer (useGradients=true, useEnsemble=false).
-PolicyGradientTraining pgTrainer;
+ShotTypeSelector shotSelector;
+SelfPlayRollout  selfPlayRollout;
 
-ScoreHeuristic scoreHeuristic;
-CloseToButtonHeuristic pinHeuristic;
-PenaltyHeuristic penaltyHeuristic;
-ExpertShotHeuristic expertHeuristic;
 TrainingPreview    trainingPreview;
 PolicyDiagnostics  policyDiagnostics;
 ModelStorage       modelStorage;
+
+// Legacy trainers kept for save/load compatibility but not actively used in training.
+ExpertEnsemble       ensemble;
+PolicySearchTraining singleTrainer;
+PolicyGradientTraining pgTrainer;
+ExpertShotHeuristic    expertHeuristic;
+ExpertShotDataset      expertShots;
+RecordSession          recordSession;
+String                 recordStatus = "";
 
 int  trainingTarget = 100;
 int  trainingDone   = 0;
@@ -79,10 +82,6 @@ RandomState      aiTestRandom;
 boolean          aiTestSimulating = false;
 ScoreResult      aiTestScore;
 Shot             aiTestLastShot;
-
-ExpertShotDataset expertShots;
-RecordSession     recordSession;
-String            recordStatus = "";
 
 // ----- Setup / draw ------------------------------------------
 void settings() {
@@ -103,76 +102,42 @@ void setup() {
   ui      = new UI();
   game    = new Game();
 
-  ensemble         = new ExpertEnsemble();
-  gradientEnsemble = new GradientEnsemble();
-  singleTrainer    = new PolicySearchTraining();
-  pgTrainer        = new PolicyGradientTraining();
-  scoreHeuristic   = new ScoreHeuristic();
-  pinHeuristic     = new CloseToButtonHeuristic();
-  penaltyHeuristic = new PenaltyHeuristic();
-  expertHeuristic  = new ExpertShotHeuristic();
-  trainingPreview  = new TrainingPreview();
+  selfPlayRollout   = new SelfPlayRollout();
+  gradientEnsemble  = new GradientEnsemble();
+  shotSelector      = new ShotTypeSelector(gradientEnsemble);
+  trainingPreview   = new TrainingPreview();
   policyDiagnostics = new PolicyDiagnostics();
   modelStorage      = new ModelStorage();
-  expertShots      = new ExpertShotDataset();
+
+  // Legacy (kept for record mode / save compatibility)
+  ensemble        = new ExpertEnsemble();
+  singleTrainer   = new PolicySearchTraining();
+  pgTrainer       = new PolicyGradientTraining();
+  expertHeuristic = new ExpertShotHeuristic();
+  expertShots     = new ExpertShotDataset();
 }
 
-// Returns a representative NeuralPolicy from whichever model is currently active.
+// Representative policy for record-mode slider preview.
 NeuralPolicy activePolicy() {
-  if (useGradients) {
-    return useEnsemble ? gradientEnsemble.anyPolicy() : pgTrainer.policy;
-  }
-  if (useEnsemble) return ensemble.anyPolicy();
-  return singleTrainer.current;
+  return gradientEnsemble.anyPolicy();
 }
 
-// Dispatch inference: pick the best shot from the active model.
+// Compute the curriculum depth cap from training progress.
+int curriculumDepthCap() {
+  return min(TOTAL_STONES, 1 + trainingDone / CURRICULUM_STEP);
+}
+
+// Dispatch inference using the shot-type selector.
+// sampleMode=true -> weighted-random (PLAY); false -> argmax (TEST).
 Shot bestShotActive(ArrayList<Stone> layout, int stonesLeft, int lastTeam,
-                    Heuristic scorer, boolean logScores) {
-  if (useGradients) {
-    if (useEnsemble) {
-      return gradientEnsemble.bestShot(layout, stonesLeft, lastTeam, scorer, logScores);
-    }
-    float[] state = pgTrainer.policy.convertState(layout, stonesLeft, lastTeam);
-    Shot shot = pgTrainer.policy.predictMean(state);
-    if (logScores) {
-      policyDiagnostics.logGradientInference(pgTrainer.policy, layout,
-                                             stonesLeft, lastTeam, scorer);
-    }
-    return shot;
-  }
-  if (useEnsemble) {
-    return ensemble.bestShot(layout, stonesLeft, lastTeam, scorer, logScores);
-  }
-  // Single policy-search model: predict directly (no ensemble competition).
-  float[] state = singleTrainer.current.convertState(layout, stonesLeft, lastTeam);
-  return singleTrainer.current.predict(state);
+                    boolean logScores, boolean sampleMode) {
+  return gradientEnsemble.bestShot(layout, stonesLeft, lastTeam,
+                                   shotSelector, logScores, sampleMode);
 }
 
-// Reset whichever trainer is currently selected.
 void resetActiveTrainer() {
-  if (useGradients) {
-    if (useEnsemble) gradientEnsemble.reset();
-    else pgTrainer.reset();
-  } else if (useEnsemble) {
-    ensemble.reset();
-  } else {
-    singleTrainer.reset();
-  }
-}
-
-// Switch use-ensemble flag and reset the newly selected trainer.
-void setUseEnsemble(boolean val) {
-  if (useEnsemble == val) return;
-  useEnsemble = val;
-  trainingDone = 0;
-  trainingStatus = "Ny modell";
-}
-
-// Switch algorithm flag and reset the newly selected trainer.
-void setUseGradients(boolean val) {
-  if (useGradients == val) return;
-  useGradients = val;
+  gradientEnsemble.reset();
+  shotSelector.reset();
   trainingDone = 0;
   trainingStatus = "Ny modell";
 }
@@ -214,35 +179,14 @@ void stopRecordMode() {
   ui.onRecordExit();
 }
 
-ArrayList<Heuristic> activeTrainingHeuristics() {
-  ArrayList<Heuristic> heuristics = new ArrayList<Heuristic>();
-  if (trainPenaltyEnabled) heuristics.add(penaltyHeuristic);
-  if (trainPinEnabled)     heuristics.add(pinHeuristic);
-  if (trainScoreEnabled)   heuristics.add(scoreHeuristic);
-  if (heuristics.isEmpty()) heuristics.add(pinHeuristic); // safety: at least one
-  return heuristics;
-}
-
 void draw() {
   background(20);
 
   if (appMode == AppMode.TRAINING) {
     if (trainingActive) {
-      ArrayList<Heuristic> heuristics = activeTrainingHeuristics();
-      if (useGradients) {
-        if (useEnsemble) {
-          gradientEnsemble.trainAll(heuristics, ui.shotsPerPrediction);
-        } else {
-          pgTrainer.shotsPerUpdate = ui.shotsPerPrediction;
-          pgTrainer.updateStep(heuristics);
-        }
-      } else if (useEnsemble) {
-        ensemble.trainAll(heuristics, ui.shotsPerPrediction,
-                          expertHeuristic, ui.expertShotsPerPrediction, expertShots);
-      } else {
-        singleTrainer.comparePolicies(heuristics, ui.shotsPerPrediction,
-                                      expertHeuristic, ui.expertShotsPerPrediction, expertShots);
-      }
+      int depthCap = curriculumDepthCap();
+      gradientEnsemble.trainAll(depthCap, SHOTS_PER_ROUND);
+      shotSelector.updateStep(depthCap);
       trainingDone++;
       trainingPreview.recordSnapshot(trainingDone, activePolicy());
       if (trainingDone >= trainingTarget) {
@@ -312,7 +256,8 @@ void cancelTraining() {
 
 void resetTrainingModel() {
   if (trainingActive) return;
-  resetActiveTrainer();
+  gradientEnsemble.reset();
+  shotSelector.reset();
   trainingDone   = 0;
   trainingTarget = 0;
   trainingStatus = "Ny modell";
@@ -370,10 +315,7 @@ void runAiTestSim() {
   aiTestStones = new ArrayList<Stone>();
   aiTestRandom.randomize(aiTestStones, STONES_PER_TEAM);
 
-  Heuristic scorer = activeTrainingHeuristics().isEmpty()
-                   ? pinHeuristic
-                   : activeTrainingHeuristics().get(0);
-  aiTestLastShot = bestShotActive(aiTestStones, 1, TEAM_RED, scorer, true);
+  aiTestLastShot = bestShotActive(aiTestStones, 1, TEAM_RED, true, false);
 
   PVector h = sheet.hackWorld();
   Stone fired = new Stone(h.x, h.y, TEAM_YELLOW);
@@ -538,11 +480,8 @@ void maybeAiShoot() {
     lastTeam = game.stones.get(game.stones.size() - 1).team;
   }
 
-  Heuristic scorer = activeTrainingHeuristics().isEmpty()
-                   ? pinHeuristic
-                   : activeTrainingHeuristics().get(0);
   Shot shot = bestShotActive(game.stones, game.stonesRemaining(TEAM_YELLOW),
-                             lastTeam, scorer, false);
+                             lastTeam, true, true);
   game.fire(shot);
 }
 
@@ -609,28 +548,20 @@ void drawSidebarBackdrop() {
 }
 
 void drawDebugMarkers() {
-  PVector b = worldToScreen(house.BUTTON);
   PVector h = worldToScreen(sheet.hackWorld());
 
   pushStyle();
   noFill();
   strokeWeight(1);
 
-  stroke(0, 255, 0, 200);
-  ellipse(b.x, b.y, 10, 10);
-  line(b.x - 8, b.y, b.x + 8, b.y);
-  line(b.x, b.y - 8, b.x, b.y + 8);
-
   stroke(255, 200, 0, 200);
   ellipse(h.x, h.y, 10, 10);
   line(h.x - 8, h.y, h.x + 8, h.y);
   line(h.x, h.y - 8, h.x, h.y + 8);
 
-  fill(0, 255, 0, 220);
+  fill(255, 200, 0, 220);
   noStroke();
   textSize(11);
-  text("tee", b.x + 8, b.y - 14);
-  fill(255, 200, 0, 220);
   text("hack", h.x + 8, h.y - 14);
   popStyle();
 }

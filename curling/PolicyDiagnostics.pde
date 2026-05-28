@@ -23,6 +23,35 @@ class PolicyDiagnostics {
     println("=========================================");
   }
 
+  // Full inference log for gradient ensemble + shot-type selector.
+  void logEnsembleInference(String[] expertNames, float[] probs, int chosen,
+                            NeuralPolicy policy, ArrayList<Stone> layout,
+                            int stonesLeft, int lastTeam, Shot shot,
+                            String modeLabel) {
+    if (policy == null || layout == null) return;
+
+    float[] state  = policy.convertState(layout, stonesLeft, lastTeam);
+    float[] hidden = policy.hiddenLayer.feedForward(state);
+    float[] means  = policy.outputLayer.feedForward(hidden);
+    float[] logStds = policy.meanAndStd ? policy.outputLogStd.feedForward(hidden) : null;
+
+    float[] health = hiddenHealthPcts(hidden, policy.HIDDEN_ACTIVATION);
+    float satPct   = health[0];
+    float deadPct  = health[1];
+    float outSatPct = outputSaturationPct(means, policy.OUTPUT_ACTIVATION);
+
+    println("========== AI SHOT (" + modeLabel + ") ==========");
+    println("-- selector probs --");
+    for (int i = 0; i < expertNames.length; i++) {
+      println("  " + expertNames[i] + "  p=" + nf(probs[i], 0, 3)
+              + (i == chosen ? "  *CHOSEN*" : ""));
+    }
+    println("-- chosen expert: " + expertNames[chosen] + " --");
+    logGradientExpertLine(expertNames[chosen], policy, hidden, means, logStds,
+                          shot, 0, satPct, deadPct, outSatPct);
+    println("=========================================");
+  }
+
   // One expert line for PG inference (matches policy-search ensemble format).
   void logGradientExpertLine(String name, NeuralPolicy policy,
                              float[] hidden, float[] means, float[] logStds,

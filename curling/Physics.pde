@@ -47,7 +47,7 @@ class Physics {
 
     if (cull) {
       for (Stone s : stones) {
-        if (!s.hogPassed && s.pos.y + s.radius >= sheet.hogY) s.hogPassed = true;
+        if (leadingEdgeY(s) >= sheet.hogY) s.hogPassed = true;
       }
       removeOutOfBounds(stones);
     }
@@ -144,17 +144,29 @@ class Physics {
       if (s.vel.mag() < STOP_SPEED) {
         s.vel.set(0, 0);
         s.curl = 0;
+        // Sync hog flag to final resting position (stone may have rolled back).
+        s.hogPassed = leadingEdgeY(s) >= sheet.hogY;
       }
     }
   }
 
+  // Leading edge toward the house (+y direction).
+  float leadingEdgeY(Stone s) {
+    return s.pos.y + s.radius;
+  }
+
   // -----------------------------------------------------------
   // removeOutOfBounds: past far back line, off-sheet laterally,
-  // or well past the hack end.
+  // well past the hack end, or came to rest without clearing the hog line.
   // -----------------------------------------------------------
   void removeOutOfBounds(ArrayList<Stone> stones) {
     for (int i = stones.size() - 1; i >= 0; i--) {
       Stone s = stones.get(i);
+      // Hog violation: at rest with leading edge short of the hog line.
+      if (!s.isMoving() && leadingEdgeY(s) < sheet.hogY) {
+        stones.remove(i);
+        continue;
+      }
       // Entire stone past far back line, continuing toward hog / center.
       if (s.pos.y - s.radius > sheet.backFarY + 0.5) {
         stones.remove(i);

@@ -1,16 +1,25 @@
-// Holds one PolicyGradientTraining per expert specialisation.
-// Training: one updateStep per expert per frame.
-// Inference: simulate each expert's mean shot, pick the best heuristic score.
+// 8-expert gradient ensemble. Each expert specialises in one shot type
+// and receives its own tailored heuristic list.
+//
+// Expert index mapping (used by ShotTypeSelector):
+//   0 Draw         1 DrawCurlR  2 DrawCurlL
+//   3 CurlR        4 CurlL      5 Takeout
+//   6 Guard        7 Freeze
 class GradientEnsemble {
     String[] names;
     PolicyGradientTraining[] trainers;
+    ArrayList<Heuristic>[] typeHeuristics;
     int count;
     PolicyDiagnostics diagnostics = new PolicyDiagnostics();
+    FinalScoreHeuristic finalHeuristic = new FinalScoreHeuristic();
 
     GradientEnsemble() {
         NeuralPolicy seed = new NeuralPolicy();
         names = new String[]{
-            "Draw", "DrawCurlR", "DrawCurlL", "CurlR", "CurlL", "Takeout"
+            "Draw", "DrawCurlR", "DrawCurlL",
+            "CurlR", "CurlL",
+            "Takeout",
+            "Guard", "Freeze"
         };
         NeuralPolicy[] seeds = {
             seed.expertDraw(true),
@@ -18,7 +27,9 @@ class GradientEnsemble {
             seed.expertDrawCurlLeft(true),
             seed.expertCurlRight(true),
             seed.expertCurlLeft(true),
-            seed.expertTakeout(true)
+            seed.expertTakeout(true),
+            seed.expertGuard(true),
+            seed.expertFreeze(true)
         };
         count = seeds.length;
         trainers = new PolicyGradientTraining[count];
@@ -26,91 +37,86 @@ class GradientEnsemble {
             trainers[i] = new PolicyGradientTraining(seeds[i]);
             trainers[i].expertName = names[i];
         }
+
+        // Per-type heuristic lists (finalHeuristic appended to all)
+        typeHeuristics = new ArrayList[count];
+        DrawHeuristic    drawH    = new DrawHeuristic();
+        CurlHeuristic    curlH    = new CurlHeuristic();
+        TakeoutHeuristic takeoutH = new TakeoutHeuristic();
+        GuardHeuristic   guardH   = new GuardHeuristic();
+        FreezeHeuristic  freezeH  = new FreezeHeuristic();
+
+        for (int i = 0; i < count; i++) {
+            typeHeuristics[i] = new ArrayList<Heuristic>();
+        }
+        // Draw, DrawCurlR, DrawCurlL
+        typeHeuristics[0].add(drawH);
+        typeHeuristics[1].add(drawH);
+        typeHeuristics[2].add(drawH);
+        // CurlR, CurlL
+        typeHeuristics[3].add(curlH);
+        typeHeuristics[4].add(curlH);
+        // Takeout
+        typeHeuristics[5].add(takeoutH);
+        // Guard
+        typeHeuristics[6].add(guardH);
+        // Freeze
+        typeHeuristics[7].add(freezeH);
+
+        // Append FinalScoreHeuristic to every expert's list
+        for (int i = 0; i < count; i++) {
+            typeHeuristics[i].add(finalHeuristic);
+        }
     }
 
-    void trainAll(ArrayList<Heuristic> heuristics, int shotsPerUpdate) {
+    // Train all experts. Each draws its own random depth from the curriculum cap.
+    void trainAll(int depthCap, int shotsPerUpdate) {
         for (int i = 0; i < count; i++) {
+            int depth = max(1, (int) random(1, depthCap + 1));
             trainers[i].shotsPerUpdate = shotsPerUpdate;
-            trainers[i].updateStep(heuristics);
+            trainers[i].updateStep(typeHeuristics[i], depth);
         }
     }
 
     void reset() {
-        for (int i = 0; i < count; i++) {
-            trainers[i].reset();
-        }
+        for (int i = 0; i < count; i++) trainers[i].reset();
     }
 
+    // Use the shot-type selector to pick the best expert, then return its mean shot.
+    // sampleMode=true -> weighted-random from selector probabilities (PLAY).
+    // sampleMode=false -> argmax (TEST, deterministic).
     Shot bestShot(ArrayList<Stone> layout, int stonesLeft, int lastTeam,
-                  Heuristic scorer, boolean logScores) {
-        Shot best = null;
-        float bestScore = Float.NEGATIVE_INFINITY;
-        String bestName = "";
-        float satSum = 0;
-        float deadSum = 0;
-        float outSatSum = 0;
+                  ShotTypeSelector selector, boolean logScores, boolean sampleMode) {
+        NeuralPolicy refPolicy = trainers[0].policy;
+        float[] state = refPolicy.convertState(layout, stonesLeft, lastTeam);
 
-        if (logScores) println("--- PG expert scores ---");
-
-        for (int i = 0; i < count; i++) {
-            NeuralPolicy p = trainers[i].policy;
-            float[] state = p.convertState(layout, stonesLeft, lastTeam);
-            float[] hidden = p.hiddenLayer.feedForward(state);
-            float[] means = p.outputLayer.feedForward(hidden);
-            float[] logStds = p.outputLogStd.feedForward(hidden);
-            float[] health = diagnostics.hiddenHealthPcts(hidden, p.HIDDEN_ACTIVATION);
-            float satPct = health[0];
-            float deadPct = health[1];
-            float outSatPct = diagnostics.outputSaturationPct(means, p.OUTPUT_ACTIVATION);
-            satSum += satPct;
-            deadSum += deadPct;
-            outSatSum += outSatPct;
-            Shot shot = p.predictMean(state);
-
-            float score = 0;
-            if (scorer != null) {
-                ShotResult result = scorer.simulate(p, state, layout, null);
-                score = scorer.scoreResult(result);
-            }
-
-            if (logScores) {
-                diagnostics.logGradientExpertLine(names[i], p, hidden, means, logStds,
-                                                  shot, score, satPct, deadPct, outSatPct);
-            }
-
-            if (score > bestScore) {
-                bestScore = score;
-                best = shot;
-                bestName = names[i];
-            }
+        int chosen;
+        float[] probs = new float[count];
+        if (selector != null) {
+            probs = selector.probs(state);
+            chosen = sampleMode ? selector.sampleFromProbs(probs)
+                                : selector.argmaxFromProbs(probs);
+        } else {
+            chosen = 0;
         }
 
+        Shot best = trainers[chosen].policy.predictMean(
+            trainers[chosen].policy.convertState(layout, stonesLeft, lastTeam));
+
         if (logScores) {
-            NeuralPolicy any = trainers[0].policy;
-            boolean reluHidden = (any.HIDDEN_ACTIVATION == ActivationKind.RELU);
-            boolean tanhOut = (any.OUTPUT_ACTIVATION == ActivationKind.TANH);
-            String avgLine = "Avg hidden sat: " + nf(satSum / count, 0, 1) + "%";
-            if (reluHidden) {
-                avgLine += "  inactive: " + nf(deadSum / count, 0, 1) + "%";
-            }
-            if (tanhOut) {
-                avgLine += "  outSat: " + nf(outSatSum / count, 0, 1) + "%";
-            }
-            println(avgLine);
-            if (best != null) {
-                println("Chosen shot: " + bestName
-                    + "  score=" + nf(bestScore, 0, 3)
-                    + "  curl=" + nf(best.curl, 0, 3)
-                    + "  spd=" + nf(best.speed, 0, 1)
-                    + "  ang=" + nf(degrees(best.angle), 0, 1) + "deg");
-            } else {
-                println("Chosen shot: (none)");
-            }
+            String mode = sampleMode ? "PLAY" : "TEST";
+            diagnostics.logEnsembleInference(names, probs, chosen,
+                trainers[chosen].policy, layout, stonesLeft, lastTeam, best, mode);
         }
         return best;
     }
 
-    NeuralPolicy anyPolicy() {
-        return trainers[0].policy;
+    NeuralPolicy anyPolicy() { return trainers[0].policy; }
+
+    // Return the mean shot for expert i given the board state.
+    Shot expertMeanShot(int expertIdx, ArrayList<Stone> layout, int stonesLeft, int lastTeam) {
+        NeuralPolicy p = trainers[expertIdx].policy;
+        float[] state = p.convertState(layout, stonesLeft, lastTeam);
+        return p.predictMean(state);
     }
 }

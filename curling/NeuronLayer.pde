@@ -156,6 +156,34 @@ class NeuronLayer {
         }
     }
 
+    // Load a @layer block into THIS layer object. Returns next index after layer.
+    // Used by ShotTypeSelector and other non-policy owners.
+    int loadSelf(String[] lines, int idx) {
+        if (idx >= lines.length) return idx;
+        String header = trim(lines[idx]);
+        if (!header.startsWith("@layer ")) return idx;
+        String[] parts = split(header, ' ');
+        if (parts.length < 5) return idx + 1;
+        ActivationKind act  = parseActivation(parts[2]);
+        int neuronCount = parseInt(parts[3]);
+        int inputCount  = parseInt(parts[4]);
+        if (neuronCount != neurons.length || inputCount != neurons[0].weights.length) {
+            // Rebuild if dimensions changed, also reinitialize Adam moments.
+            NeuronLayer rebuilt = new NeuronLayer(neuronCount, inputCount, act);
+            neurons = rebuilt.neurons;
+            mW = rebuilt.mW; mB = rebuilt.mB;
+            vW = rebuilt.vW; vB = rebuilt.vB;
+            adamStep = 0;
+        }
+        idx++;
+        Neuron parser = new Neuron(inputCount, act);
+        for (int i = 0; i < neuronCount && idx < lines.length; i++, idx++) {
+            Neuron n = parser.createFromLine(lines[idx]);
+            if (n != null) neurons[i] = n;
+        }
+        return idx;
+    }
+
     // Parse @layer line at lines[idx] and following neuron lines. Returns index after layer.
     int loadFromLines(String[] lines, int idx, NeuralPolicy policy,
                       String expectedTag) {

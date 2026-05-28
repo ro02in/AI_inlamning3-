@@ -169,7 +169,7 @@ class NeuralPolicy {
     }
 
     NeuralPolicy expertFreeze(boolean meanAndStd) {
-        return new NeuralPolicy(-0.2f, 0.2f, 12f, 22f, -5f, 5f, meanAndStd);
+        return new NeuralPolicy(-0.2f, 0.2f, 12f, 26f, -5f, 5f, meanAndStd);
     }
 
     // ---- Forward pass helpers ----

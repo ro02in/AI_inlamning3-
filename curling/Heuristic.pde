@@ -15,7 +15,6 @@ class ShotResult {
 }
 
 abstract class Heuristic {
-    int   shotsPerComparison = 50;
     float weight = 1.0; // relative importance when combining heuristics
     float scale  = 1.0; // divide raw score by this to normalise magnitude across heuristics
 
@@ -65,7 +64,6 @@ abstract class Heuristic {
 // Heuristic that simulates the shot and scores it based on the end result (win/loss/tie).
 class ScoreHeuristic extends Heuristic {
     ScoreHeuristic() {
-        this.shotsPerComparison = 30;
         this.scale = 3.0; // typical delta range -3..+3 → normalised to ~-1..+1
         this.weight = 2.5; // make this heuristic more important relative to others
     }
@@ -82,7 +80,6 @@ class ScoreHeuristic extends Heuristic {
 // Heuristic that scores a shot only based on how close it is to the button.
 class CloseToButtonHeuristic extends Heuristic {
     CloseToButtonHeuristic() {
-        this.shotsPerComparison = 30;
         this.scale = 50.0;
         this.weight = 0.8;
     }
@@ -101,7 +98,6 @@ class CloseToButtonHeuristic extends Heuristic {
 // Heuristic that scores a shot based on various penalties and bonuses related to the fired stone's position.
 class PenaltyHeuristic extends Heuristic {
     PenaltyHeuristic() {
-        this.shotsPerComparison = 30;
         this.scale = 50.0;
         this.weight = 1.2;
     }
@@ -113,5 +109,34 @@ class PenaltyHeuristic extends Heuristic {
         if (fired.pos.x < 0 || fired.pos.x > sheet.SHEET_WIDTH_FT) fitness -= 100;
         if (fired.pos.y + fired.radius < sheet.hogY || fired.pos.y + fired.radius > sheet.backFarY) fitness -= 100; // too short (hog not cleared) or fully past far back line
         return fitness;
+    }
+}
+
+// Matches a predicted shot directly against an expert target shot (no physics simulation).
+class ExpertShotHeuristic extends Heuristic {
+    Shot targetShot;
+
+    ExpertShotHeuristic() {
+        this.weight = 5.0;
+        this.scale  = 1.0;
+    }
+
+    void setTarget(Shot target) {
+        targetShot = target;
+    }
+
+    // Higher is better; 0 is perfect match.
+    float matchScore(Shot predicted) {
+        if (targetShot == null || predicted == null) return 0;
+        float curlErr  = abs(predicted.curl - targetShot.curl);
+        float speedErr = abs(predicted.speed - targetShot.speed) / UI.SPEED_MAX;
+        // Normalize against +/- 10 degrees used by NeuralPolicy output mapping.
+        float angleErr = abs(predicted.angle - targetShot.angle) / (PI / 18.0);
+        return -(curlErr + speedErr + angleErr);
+    }
+
+    @Override
+    float scoreResult(ShotResult result) {
+        return matchScore(result.plannedShot);
     }
 }

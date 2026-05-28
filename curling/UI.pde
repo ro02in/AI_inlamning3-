@@ -249,23 +249,33 @@ class UI {
   TimingBar  speedBar;
   Button     shootBtn;
   Button     rndStateBtn;
+  Button     datasetBtn;
+  Button     expertNextBtn;
+  Button     expertNewBtn;
+  Button     expertExitBtn;
   Button     trainBtn;
   Button     testBtn;
   Button     resetModelBtn;
   Button     penaltyHeuristicBtn;
   Button     pinHeuristicBtn;
   Button     scoreHeuristicBtn;
+  Button     simShotsMinusBtn;
+  Button     simShotsPlusBtn;
+  Button     expertShotsMinusBtn;
+  Button     expertShotsPlusBtn;
   Slider     activeSlider;
 
   int        trainComparisons = 100;
+  int        shotsPerPrediction = 50;
+  int        expertShotsPerPrediction = 10;
   boolean    draggingTrainBar = false;
   final int  TRAIN_MIN = 10;
   final int  TRAIN_MAX = 1000000;
   final float TRAIN_BAR_Y = 114;
   final float TRAIN_BAR_H = 10;
-  final float HEURISTIC_BTN_Y = 130;
-  final float HEURISTIC_BTN_H = 20;
-  final float AI_STATUS_Y = 154;
+  final float HEURISTIC_BTN_Y = 146;
+  final float HEURISTIC_BTN_H = 18;
+  final float AI_STATUS_Y = 168;
 
   // Lock workflow phase. 0 = locking angle, 1 = locking speed.
   final int PHASE_ANGLE = 0;
@@ -287,8 +297,10 @@ class UI {
   final float BAR_Y        = 708;
   final float BAR_H        =  20;
   final float BTN_TOP      = 736;
-  final float TRAIN_BTN_TOP = 794;
-  final float EXTRA_BTN_TOP = 840;
+  final float TRAIN_BTN_TOP    = 794;
+  final float EXTRA_BTN_TOP    = 840;
+  final float DATASET_BTN_TOP  = 882;
+  final float EXPERT_BTN_TOP   = TRAIN_BTN_TOP;
 
   // ----- Lock-bar tunables (adjust to taste) -----------------
   // Oscillation rate (cycles per second) at curl=0 vs |curl|=1.
@@ -344,6 +356,25 @@ class UI {
                              halfX + halfW + 6,
                              EXTRA_BTN_TOP,
                              halfW, 36);
+    datasetBtn = new Button("Expert dataset",
+                            halfX,
+                            DATASET_BTN_TOP,
+                            btnW, 36);
+
+    float expertGap = 6;
+    float expertThirdW = (btnW - expertGap * 2) / 3.0f;
+    expertNextBtn = new Button("N\u00e4sta",
+                               halfX,
+                               EXPERT_BTN_TOP,
+                               expertThirdW, 40);
+    expertNewBtn  = new Button("Ny state",
+                               halfX + expertThirdW + expertGap,
+                               EXPERT_BTN_TOP,
+                               expertThirdW, 40);
+    expertExitBtn = new Button("Avsluta",
+                               halfX + (expertThirdW + expertGap) * 2,
+                               EXPERT_BTN_TOP,
+                               expertThirdW, 40);
 
     float hx = ICE_W + 20;
     float hgap = 4;
@@ -351,6 +382,14 @@ class UI {
     penaltyHeuristicBtn = new Button("Straff", hx,                    HEURISTIC_BTN_Y, hw, HEURISTIC_BTN_H);
     pinHeuristicBtn     = new Button("Pin",    hx + hw + hgap,         HEURISTIC_BTN_Y, hw, HEURISTIC_BTN_H);
     scoreHeuristicBtn   = new Button("Score",  hx + (hw + hgap) * 2,   HEURISTIC_BTN_Y, hw, HEURISTIC_BTN_H);
+
+    float smallW = 18;
+    float smallH = 14;
+    float smallRight = ICE_W + SIDEBAR_W - 16;
+    simShotsMinusBtn    = new Button("-", smallRight - smallW * 2 - 4, 126, smallW, smallH);
+    simShotsPlusBtn     = new Button("+", smallRight - smallW,          126, smallW, smallH);
+    expertShotsMinusBtn = new Button("-", smallRight - smallW * 2 - 4, 142, smallW, smallH);
+    expertShotsPlusBtn  = new Button("+", smallRight - smallW,          142, smallW, smallH);
     lockPhase = PHASE_ANGLE;
   }
 
@@ -377,6 +416,26 @@ class UI {
     angleBar.reset();
     speedBar.reset();
     lockPhase = PHASE_ANGLE;
+  }
+
+  void onRecordEnter() {
+    onTurnStart();
+  }
+
+  void onRecordExit() {
+    onTurnStart();
+  }
+
+  void setSlidersFromShot(Shot shot) {
+    curlSlider.value  = constrain(shot.curl, curlSlider.minV, curlSlider.maxV);
+    speedSlider.value = constrain(shot.speed / SPEED_MAX,
+                                  speedSlider.minV, speedSlider.maxV);
+    angleSlider.value = constrain(degrees(shot.angle),
+                                  angleSlider.minV, angleSlider.maxV);
+  }
+
+  boolean recordMode() {
+    return appMode == AppMode.RECORD;
   }
 
   // -----------------------------------------------------------
@@ -414,11 +473,14 @@ class UI {
     drawAiPanel();
 
     boolean controlsEnabled = appMode != AppMode.TRAINING;
+    boolean showLockBars = controlsEnabled && !recordMode();
     curlSlider.draw();
     speedSlider.draw();
     angleSlider.draw();
 
-    if (controlsEnabled) activeBar().draw();
+    if (showLockBars) activeBar().draw();
+
+    if (recordMode()) drawRecordPanel();
 
     if (appMode == AppMode.TEST) {
       shootBtn.label   = aiTestSimulating ? "..." : "Nasta test";
@@ -426,6 +488,10 @@ class UI {
     } else if (game.state == GameState.ENDED) {
       shootBtn.label   = "Ny match";
       shootBtn.enabled = controlsEnabled;
+    } else if (recordMode()) {
+      shootBtn.label   = "Skjut";
+      shootBtn.enabled = controlsEnabled
+                      && recordSession != null && recordSession.canShoot();
     } else if (game.state == GameState.AIMING) {
       shootBtn.label   = (lockPhase == PHASE_ANGLE) ? "L\u00e5s vinkel" : "L\u00e5s fart";
       shootBtn.enabled = controlsEnabled && game.currentTeam == TEAM_RED;
@@ -435,8 +501,22 @@ class UI {
     }
     shootBtn.draw();
 
-    rndStateBtn.enabled = controlsEnabled && appMode == AppMode.PLAY;
-    rndStateBtn.draw();
+    if (recordMode()) {
+      boolean recReady = controlsEnabled && recordSession != null
+                      && recordSession.canSave();
+      expertNextBtn.enabled = recReady;
+      expertNewBtn.enabled  = recReady;
+      expertExitBtn.enabled = controlsEnabled;
+      expertNextBtn.draw();
+      expertNewBtn.draw();
+      expertExitBtn.draw();
+      return;
+    }
+
+    datasetBtn.label   = "Expert dataset";
+    datasetBtn.enabled = controlsEnabled && appMode != AppMode.TRAINING
+                      && appMode != AppMode.TEST;
+    datasetBtn.draw();
 
     trainBtn.label   = trainingActive ? "Avbryt" : "Trana";
     trainBtn.enabled = appMode != AppMode.TEST
@@ -453,12 +533,17 @@ class UI {
     testBtn.draw();
     drawHeuristicButtons();
 
+    resetModelBtn.label   = "Ny modell";
     resetModelBtn.enabled = controlsEnabled && appMode != AppMode.TEST;
     resetModelBtn.draw();
+
+    rndStateBtn.enabled = controlsEnabled && appMode == AppMode.PLAY;
+    rndStateBtn.draw();
   }
 
   void drawHeuristicButtons() {
-    boolean canPick = appMode != AppMode.TRAINING && appMode != AppMode.TEST;
+    boolean canPick = appMode != AppMode.TRAINING && appMode != AppMode.TEST
+                   && appMode != AppMode.RECORD;
     drawHeuristicButton(penaltyHeuristicBtn, trainPenaltyEnabled, canPick);
     drawHeuristicButton(pinHeuristicBtn, trainPinEnabled, canPick);
     drawHeuristicButton(scoreHeuristicBtn, trainScoreEnabled, canPick);
@@ -507,6 +592,22 @@ class UI {
     textSize(9);
     text(formatTrainCount(trainComparisons) + " jamf.", right, TRAIN_BAR_Y - 14);
 
+    fill(185);
+    textAlign(LEFT, TOP);
+    textSize(9);
+    text("Shots/pred: " + shotsPerPrediction, left, 124);
+    text("Expert/pred: " + expertShotsPerPrediction, left, 140);
+
+    boolean canTuneCounts = appMode != AppMode.RECORD;
+    simShotsMinusBtn.enabled = canTuneCounts;
+    simShotsPlusBtn.enabled = canTuneCounts;
+    expertShotsMinusBtn.enabled = canTuneCounts;
+    expertShotsPlusBtn.enabled = canTuneCounts;
+    simShotsMinusBtn.draw();
+    simShotsPlusBtn.draw();
+    expertShotsMinusBtn.draw();
+    expertShotsPlusBtn.draw();
+
     fill(200);
     textAlign(LEFT, TOP);
     textSize(9);
@@ -518,6 +619,9 @@ class UI {
     } else if (appMode == AppMode.TEST) {
       text("Test: Rod " + testHumanWins + "  Gul " + testAiWins
            + "  (" + testGamesPlayed + " sim)", left, AI_STATUS_Y);
+    } else if (appMode == AppMode.RECORD) {
+      int n = expertShots != null ? expertShots.count() : 0;
+      text("Dataset: " + n + " rader  |  " + expertShots.csvPath, left, AI_STATUS_Y);
     } else {
       text("Heuristik: " + heuristicLabel() + "  |  " + trainingDone + " jamf.", left, AI_STATUS_Y);
     }
@@ -561,6 +665,14 @@ class UI {
     return str(n);
   }
 
+  void adjustShotsPerPrediction(int delta) {
+    shotsPerPrediction = constrain(shotsPerPrediction + delta, 1, 500);
+  }
+
+  void adjustExpertShotsPerPrediction(int delta) {
+    expertShotsPerPrediction = constrain(expertShotsPerPrediction + delta, 0, 500);
+  }
+
   float trainBarX() { return ICE_W + 16; }
   float trainBarW() { return SIDEBAR_W - 32; }
 
@@ -584,6 +696,17 @@ class UI {
   }
 
   // ----- stats panel: header + turn + status + stones-left ----
+  void drawRecordPanel() {
+    float left = ICE_W + 16;
+    pushStyle();
+    textAlign(LEFT, TOP);
+    fill(200);
+    textSize(10);
+    text("Dra stenar p\u00e5 isen f\u00f6r att \u00e4ndra layout", left, BAR_Y - 28);
+    text("N\u00e4sta / Ny state = ny layout + AI-f\u00f6rslag", left, BAR_Y - 16);
+    popStyle();
+  }
+
   void drawStatsPanel() {
     float left  = ICE_W + 16;
     float right = ICE_W + SIDEBAR_W - 16;
@@ -592,7 +715,7 @@ class UI {
     textAlign(LEFT, TOP);
     fill(235);
     textSize(15);
-    text("Skott", left, STATS_TOP);
+    text(recordMode() ? "Expert-skott" : "Skott", left, STATS_TOP);
 
     fill(170);
     textSize(11);
@@ -600,10 +723,18 @@ class UI {
     text("Status",    left, STATS_TOP + 44);
 
     textAlign(RIGHT, TOP);
-    fill(game.currentTeam == TEAM_RED ? color(230, 80, 80) : color(230, 210, 80));
-    text(game.teamLabel(game.currentTeam), right, STATS_TOP + 26);
-    fill(220);
-    text(game.stateLabel(),                right, STATS_TOP + 44);
+    if (recordMode()) {
+      fill(color(230, 210, 80));
+      text("GUL", right, STATS_TOP + 26);
+      fill(220);
+      text(recordSession != null && recordSession.simulating
+           ? "SIMULERAR" : "AIMING", right, STATS_TOP + 44);
+    } else {
+      fill(game.currentTeam == TEAM_RED ? color(230, 80, 80) : color(230, 210, 80));
+      text(game.teamLabel(game.currentTeam), right, STATS_TOP + 26);
+      fill(220);
+      text(game.stateLabel(),                right, STATS_TOP + 44);
+    }
 
     // Two rows of stone-count dots.
     drawTeamRow(left, STATS_TOP + 64, TEAM_RED);
@@ -619,7 +750,9 @@ class UI {
   // One team's row: label + 4 dots (filled = remaining, hollow = thrown).
   void drawTeamRow(float xLeft, float y, int team) {
     color teamColor = team == TEAM_RED ? color(230, 80, 80) : color(230, 210, 80);
-    int   remaining = game.stonesRemaining(team);
+    int   remaining = recordMode()
+      ? (team == TEAM_YELLOW ? 1 : 0)
+      : game.stonesRemaining(team);
 
     pushStyle();
     textAlign(LEFT, CENTER);
@@ -651,6 +784,12 @@ class UI {
   // or resets the game when the end is over.
   void triggerAction() {
     if (appMode == AppMode.TRAINING) return;
+    if (recordMode()) {
+      if (recordSession != null && recordSession.canShoot()) {
+        recordSession.shoot(intendedShot());
+      }
+      return;
+    }
     if (appMode == AppMode.TEST) {
       if (!aiTestSimulating) runAiTestSim();
       return;
@@ -679,6 +818,51 @@ class UI {
 
   // ---- Mouse wiring (called from main sketch) ---------------
   void onMousePressed(float mx, float my) {
+    if (recordMode()) {
+      if (expertExitBtn.enabled && expertExitBtn.hits(mx, my)) {
+        stopRecordMode();
+        return;
+      }
+      if (expertNextBtn.enabled && expertNextBtn.hits(mx, my)) {
+        recordNextShot();
+        return;
+      }
+      if (expertNewBtn.enabled && expertNewBtn.hits(mx, my)) {
+        recordNewState();
+        return;
+      }
+      if (shootBtn.enabled && shootBtn.hits(mx, my)) {
+        triggerAction();
+        return;
+      }
+      activeSlider = null;
+      if      (curlSlider .trackHit(mx, my)) activeSlider = curlSlider;
+      else if (speedSlider.trackHit(mx, my)) activeSlider = speedSlider;
+      else if (angleSlider.trackHit(mx, my)) activeSlider = angleSlider;
+      if (activeSlider != null) {
+        activeSlider.dragging = true;
+        activeSlider.setFromMouseY(my);
+      }
+      return;
+    }
+
+    if (simShotsMinusBtn.enabled && simShotsMinusBtn.hits(mx, my)) {
+      adjustShotsPerPrediction(-1);
+      return;
+    }
+    if (simShotsPlusBtn.enabled && simShotsPlusBtn.hits(mx, my)) {
+      adjustShotsPerPrediction(1);
+      return;
+    }
+    if (expertShotsMinusBtn.enabled && expertShotsMinusBtn.hits(mx, my)) {
+      adjustExpertShotsPerPrediction(-1);
+      return;
+    }
+    if (expertShotsPlusBtn.enabled && expertShotsPlusBtn.hits(mx, my)) {
+      adjustExpertShotsPerPrediction(1);
+      return;
+    }
+
     if (trainBtn.enabled && trainBtn.hits(mx, my)) {
       if (trainingActive) cancelTraining();
       else startTraining(trainComparisons);
@@ -688,7 +872,8 @@ class UI {
       resetTrainingModel();
       return;
     }
-    if (appMode != AppMode.TRAINING && appMode != AppMode.TEST) {
+    if (appMode != AppMode.TRAINING && appMode != AppMode.TEST
+        && appMode != AppMode.RECORD) {
       if (penaltyHeuristicBtn.hits(mx, my)) {
         togglePenaltyHeuristic();
         return;
@@ -707,7 +892,7 @@ class UI {
       else startAiTest();
       return;
     }
-    if (trainBarHit(mx, my) && appMode != AppMode.TRAINING) {
+    if (trainBarHit(mx, my) && appMode != AppMode.TRAINING && appMode != AppMode.RECORD) {
       draggingTrainBar = true;
       setTrainComparisonsFromMouse(mx);
       return;
@@ -720,6 +905,11 @@ class UI {
 
     if (rndStateBtn.enabled && rndStateBtn.hits(mx, my)){
       setRndStones();
+      return;
+    }
+
+    if (datasetBtn.enabled && datasetBtn.hits(mx, my)) {
+      startRecordMode();
       return;
     }
 
@@ -753,6 +943,14 @@ class UI {
     trainBtn.hover = trainBtn.hits(mx, my);
     testBtn.hover  = testBtn.hits(mx, my);
     resetModelBtn.hover = resetModelBtn.hits(mx, my);
+    datasetBtn.hover = datasetBtn.hits(mx, my);
+    expertNextBtn.hover = expertNextBtn.hits(mx, my);
+    expertNewBtn.hover  = expertNewBtn.hits(mx, my);
+    expertExitBtn.hover = expertExitBtn.hits(mx, my);
+    simShotsMinusBtn.hover = simShotsMinusBtn.hits(mx, my);
+    simShotsPlusBtn.hover = simShotsPlusBtn.hits(mx, my);
+    expertShotsMinusBtn.hover = expertShotsMinusBtn.hits(mx, my);
+    expertShotsPlusBtn.hover = expertShotsPlusBtn.hits(mx, my);
     penaltyHeuristicBtn.hover = penaltyHeuristicBtn.hits(mx, my);
     pinHeuristicBtn.hover = pinHeuristicBtn.hits(mx, my);
     scoreHeuristicBtn.hover = scoreHeuristicBtn.hits(mx, my);

@@ -3,10 +3,10 @@ class PolicySearchTraining {
     int   mutationsPerComparison = 5;
     float amountChallengeSet = 0.5; // 0..1, fraction of shots drawn from the fixed challenge set
     float mutationRate       = 0.08;
-    float mutationStrength   = 0.04;
+    float mutationStrength   = 0.03;
     // L2 penalty per comparison: subtracted from each policy's score proportional to sum(w^2).
     // Prevents weights drifting to the clip ceiling. Raise if saturation still grows; lower if model stops improving.
-    float weightDecay        = 0.02;
+    float weightDecay        = 0.05;
     ArrayList<Stone>   stones = new ArrayList<Stone>();
     ArrayList<Stone>[] challengeSet;
     int challengeSetSize  = 0;
@@ -23,6 +23,12 @@ class PolicySearchTraining {
         current = new NeuralPolicy();
         challengeSet  = null;
         challengeSetSize  = 0;
+        challengeSetIndex = 0;
+    }
+
+    void invalidateChallengeSet() {
+        challengeSet = null;
+        challengeSetSize = 0;
         challengeSetIndex = 0;
     }
 
@@ -54,12 +60,30 @@ class PolicySearchTraining {
         return total;
     }
 
-    // (1 + mutationsPerComparison) evolution: keep current unless a mutant scores higher on same random layouts.
-    // Physics runs once per policy per layout; all heuristics score the same positions.
-    void comparePolicies(ArrayList<Heuristic> heuristics) {
-        if (heuristics.isEmpty()) return;
+    float expertLayoutScore(ExpertShotHeuristic expertH, Shot predicted) {
+        return expertH.contribute(expertH.matchScore(predicted));
+    }
 
-        ensureChallengeSet(heuristics.get(0).shotsPerComparison);
+  // (1 + mutationsPerComparison) evolution on random/challenge + expert CSV layouts.
+    void comparePolicies(ArrayList<Heuristic> heuristics,
+            int shotsPerComparison,
+            ExpertShotHeuristic expertHeuristic,
+            int expertShotsPerComparison,
+            ExpertShotDataset expertDataset) {
+        boolean hasSimHeuristics = heuristics != null
+                && !heuristics.isEmpty()
+                && shotsPerComparison > 0;
+        boolean hasExpert = expertHeuristic != null
+                        && expertDataset != null
+                        && expertDataset.count() > 0
+                        && expertShotsPerComparison > 0;
+        if (!hasSimHeuristics && !hasExpert) return;
+
+        if (hasSimHeuristics) {
+            ensureChallengeSet(shotsPerComparison);
+        } else {
+            invalidateChallengeSet();
+        }
 
         NeuralPolicy[] candidates = new NeuralPolicy[mutationsPerComparison];
         float[]        candidateScores = new float[mutationsPerComparison];
@@ -74,50 +98,74 @@ class PolicySearchTraining {
 
         float currentScore = 0;
 
-        // Use first heuristic's shotsPerComparison as the layout budget.
-        int randomShots = heuristics.get(0).shotsPerComparison - challengeSetSize;
-        if (randomShots < 0) randomShots = 0;
+        if (hasSimHeuristics) {
+            int randomShots = shotsPerComparison - challengeSetSize;
+            if (randomShots < 0) randomShots = 0;
 
-        // --- Random layouts ---
-        for (int j = 0; j < randomShots; j++) {
-            randomState.randomize(stones, STONES_PER_TEAM);
-            float[] state = current.convertState(stones, 1, TEAM_RED);
+            // --- Random layouts ---
+            for (int j = 0; j < randomShots; j++) {
+                randomState.randomize(stones, STONES_PER_TEAM);
+                float[] state = current.convertState(stones, 1, TEAM_RED);
 
-            // Simulate once per policy, then score cheaply with every heuristic.
-            ShotResult currentResult = heuristics.get(0).simulate(current, state, stones);
-            float layoutScore = combinedScore(heuristics, currentResult);
-            currentShots.add(currentResult.plannedShot);
+                ShotResult currentResult = heuristics.get(0).simulate(current, state, stones);
+                float layoutScore = combinedScore(heuristics, currentResult);
+                currentShots.add(currentResult.plannedShot);
 
-            if (layoutScore < 0) {
-                challengeSet[challengeSetIndex] = copyLayout(stones);
-                challengeSetIndex = (challengeSetIndex + 1) % challengeSetSize;
+                if (layoutScore < 0) {
+                    challengeSet[challengeSetIndex] = copyLayout(stones);
+                    challengeSetIndex = (challengeSetIndex + 1) % challengeSetSize;
+                }
+                currentScore += layoutScore;
+
+                for (int m = 0; m < mutationsPerComparison; m++) {
+                    ShotResult cr = heuristics.get(0).simulate(candidates[m], state, stones);
+                    candidateScores[m] += combinedScore(heuristics, cr);
+                    candidateShots[m].add(cr.plannedShot);
+                }
             }
-            currentScore += layoutScore;
 
-            for (int m = 0; m < mutationsPerComparison; m++) {
-                ShotResult cr = heuristics.get(0).simulate(candidates[m], state, stones);
-                candidateScores[m] += combinedScore(heuristics, cr);
-                candidateShots[m].add(cr.plannedShot);
+            // --- Challenge-set layouts ---
+            for (int h = 0; h < challengeSetSize; h++) {
+                ArrayList<Stone> layout = challengeSet[h];
+                float[] state = current.convertState(layout, 1, TEAM_RED);
+
+                ShotResult currentResult = heuristics.get(0).simulate(current, state, layout);
+                float currentLayoutScore = combinedScore(heuristics, currentResult);
+                currentShots.add(currentResult.plannedShot);
+                if (currentLayoutScore > 0) currentLayoutScore *= 2;
+                currentScore += currentLayoutScore;
+
+                for (int m = 0; m < mutationsPerComparison; m++) {
+                    ShotResult cr = heuristics.get(0).simulate(candidates[m], state, layout);
+                    float score = combinedScore(heuristics, cr);
+                    candidateShots[m].add(cr.plannedShot);
+                    if (score > 0) score *= 2;
+                    candidateScores[m] += score;
+                }
             }
         }
 
-        // --- Challenge-set layouts ---
-        for (int h = 0; h < challengeSetSize; h++) {
-            ArrayList<Stone> layout = challengeSet[h];
-            float[] state = current.convertState(layout, 1, TEAM_RED);
+        // --- Expert CSV layouts (prediction match only, no physics) ---
+        if (hasExpert) {
+            for (int j = 0; j < expertShotsPerComparison; j++) {
+                ExpertShotEntry entry = expertDataset.randomEntry();
+                if (entry == null) break;
 
-            ShotResult currentResult = heuristics.get(0).simulate(current, state, layout);
-            float currentLayoutScore = combinedScore(heuristics, currentResult);
-            currentShots.add(currentResult.plannedShot);
-            if (currentLayoutScore > 0) currentLayoutScore *= 2;
-            currentScore += currentLayoutScore;
+                ArrayList<Stone> layout = entry.toLayout();
+                int stonesLeft = max(1, round(entry.stonesLeft));
+                float[] state = current.convertState(layout, stonesLeft, entry.lastTeam);
+                Shot target = new Shot(entry.curl, entry.speed, entry.angle);
+                expertHeuristic.setTarget(target);
 
-            for (int m = 0; m < mutationsPerComparison; m++) {
-                ShotResult cr = heuristics.get(0).simulate(candidates[m], state, layout);
-                float score = combinedScore(heuristics, cr);
-                candidateShots[m].add(cr.plannedShot);
-                if (score > 0) score *= 2;
-                candidateScores[m] += score;
+                Shot currentShot = current.predict(state);
+                currentScore += expertLayoutScore(expertHeuristic, currentShot);
+                currentShots.add(currentShot);
+
+                for (int m = 0; m < mutationsPerComparison; m++) {
+                    Shot candidateShot = candidates[m].predict(state);
+                    candidateScores[m] += expertLayoutScore(expertHeuristic, candidateShot);
+                    candidateShots[m].add(candidateShot);
+                }
             }
         }
 
@@ -148,3 +196,4 @@ class PolicySearchTraining {
         current.clipWeights();
     }
 }
+

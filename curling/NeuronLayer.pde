@@ -2,13 +2,19 @@ class NeuronLayer {
     Neuron[] neurons;
 
     NeuronLayer(int neuronCount, int inputCountPerNeuron) {
-        this(neuronCount, inputCountPerNeuron, false);
+        this(neuronCount, inputCountPerNeuron, ActivationKind.TANH);
     }
 
+    // Backwards-compatible: false = TANH, true = LINEAR.
     NeuronLayer(int neuronCount, int inputCountPerNeuron, boolean linear) {
+        this(neuronCount, inputCountPerNeuron,
+             linear ? ActivationKind.LINEAR : ActivationKind.TANH);
+    }
+
+    NeuronLayer(int neuronCount, int inputCountPerNeuron, ActivationKind activation) {
         neurons = new Neuron[neuronCount];
         for (int i = 0; i < neuronCount; i++) {
-            neurons[i] = new Neuron(inputCountPerNeuron, linear);
+            neurons[i] = new Neuron(inputCountPerNeuron, activation);
         }
     }
 
@@ -33,8 +39,9 @@ class NeuronLayer {
     }
 
     NeuronLayer copy() {
-        NeuronLayer clone = new NeuronLayer(neurons.length, neurons[0].weights.length,
-                                            neurons[0].linear);
+        NeuronLayer clone = new NeuronLayer(neurons.length,
+                                            neurons[0].weights.length,
+                                            neurons[0].activation);
         for (int i = 0; i < neurons.length; i++) {
             clone.neurons[i] = neurons[i].copy();
         }

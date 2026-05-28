@@ -3,12 +3,18 @@ class NeuralPolicy {
     int hiddenSize = 12;
     int outputSize = 3;
 
+    // Activation per layer. Output is tanh because curl/angle outputs
+    // are bounded in predict(). Try ActivationKind.RELU on hidden to
+    // experiment with saturation; usually pair with a lower WEIGHT_CLIP.
+    final ActivationKind HIDDEN_ACTIVATION = ActivationKind.TANH;
+    final ActivationKind OUTPUT_ACTIVATION = ActivationKind.TANH;
+
     NeuronLayer hiddenLayer;
     NeuronLayer outputLayer;
 
     NeuralPolicy() {
-        hiddenLayer = new NeuronLayer(hiddenSize, inputSize, false);
-        outputLayer = new NeuronLayer(outputSize, hiddenSize, false); // tanh on both layers; output capped in predict
+        hiddenLayer = new NeuronLayer(hiddenSize, inputSize, HIDDEN_ACTIVATION);
+        outputLayer = new NeuronLayer(outputSize, hiddenSize, OUTPUT_ACTIVATION);
     }
 
     Shot predict(float[] state) {
@@ -64,18 +70,18 @@ class NeuralPolicy {
                 Stone s = playedStones.get(slot);
                 state[i++] = (s.pos.x - sheet.centerX) / (sheet.SHEET_WIDTH_FT * 0.5);
                 state[i++] = (s.pos.y - sheet.hogY) / (sheet.backFarY - sheet.hogY);
-                state[i++] = s.team == TEAM_RED ? 1 : 0;
+                state[i++] = s.team == TEAM_RED ? 1 : -1;
                 state[i++] = 1; // 1 = existing stone
             } else {
                 state[i++] = 0;
                 state[i++] = 0;
                 int throwTeam = (slot % 2 == 0) ? TEAM_RED : TEAM_YELLOW;
-                state[i++] = throwTeam == TEAM_RED ? 1 : 0;
+                state[i++] = throwTeam == TEAM_RED ? 1 : -1;
                 state[i++] = -1;
             }
         }
         state[i++] = stonesLeft / (float) STONES_PER_TEAM;
-        state[i] = lastStoneTeam == TEAM_RED ? 0 : 1;
+        state[i] = lastStoneTeam == TEAM_RED ? 1 : -1;
         return state;
     }
 }

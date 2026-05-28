@@ -41,9 +41,11 @@ class ScoreHeuristic extends Heuristic {
 
         // Score: positive = good (yellow wins = AI wins), negative = bad (red wins = AI loses)
         ScoreResult score = house.scoreEnd(simStones);
-        if (score.team == TEAM_YELLOW) return score.points;
-        if (score.team == TEAM_RED)    return -score.points;
-        return 0; // tie
+        float scoreReward = 0;
+
+        if (score.team == TEAM_YELLOW) scoreReward = 1;
+        if (score.team == TEAM_RED)    scoreReward = -1;
+        return scoreReward;
     }
 }
 
@@ -80,10 +82,65 @@ class CloseToButtonHeuristic extends Heuristic {
         fitness -= d; // closer to button = higher fitness
         if (house.inHouse(fired)) fitness += 10;
         if (d < sheet.BUTTON_R_FT) fitness += 20;
+        fitness = 1.0 / (1.0 + d);
         return fitness;
     }
 }
 
+class CombinedHeuristic extends Heuristic {
+    CombinedHeuristic() {
+        this.shotsPerComparison = 50;
+    }
+
+    @Override
+    float simulateShot(NeuralPolicy policy, float[] state, ArrayList<Stone> stones) {
+        ArrayList<Stone> simStones = copyLayout(stones);
+        Shot shot = policy.predict(state);
+
+        PVector h = sheet.hackWorld();
+        Stone fired = new Stone(h.x, h.y, TEAM_YELLOW);
+        fired.curl = constrain(shot.curl, -1, 1);
+        fired.vel.set(sin(shot.angle) * shot.speed, cos(shot.angle) * shot.speed);
+        simStones.add(fired);
+
+        for (int step = 0; step < 100000; step++) {
+            physics.step(simStones, DT);
+            boolean anyMoving = false;
+            for (Stone s : simStones) if (s.isMoving()) { anyMoving = true; break; }
+            if (!anyMoving) break;
+        }
+
+        // Punishments
+        if (fired.pos.x < 0 || fired.pos.x > sheet.SHEET_WIDTH_FT) return -1;
+        if (fired.pos.y + fired.radius < sheet.hogY) return -1;
+        if (!house.inHouse(fired)) return -0.7;
+
+        // Count yellow stones in house before and after
+        int yellowBefore = 0, yellowAfter = 0;
+        int redBefore = 0, redAfter = 0;
+        for (Stone s : stones) {
+            if (s.team == TEAM_YELLOW && house.inHouse(s)) yellowBefore++;
+            if (s.team == TEAM_RED    && house.inHouse(s)) redBefore++;
+        }
+        for (Stone s : simStones) {
+            if (s.team == TEAM_YELLOW && house.inHouse(s)) yellowAfter++;
+            if (s.team == TEAM_RED    && house.inHouse(s)) redAfter++;
+        }
+        float allyKnockout  = (yellowBefore - yellowAfter) * -0.2;
+        float enemyKnockout = (redBefore - redAfter)       *  0.2;
+
+        // Score signal
+        ScoreResult score = house.scoreEnd(simStones);
+        float scoreReward = 0;
+        if (score.team == TEAM_YELLOW) scoreReward = 1;
+        if (score.team == TEAM_RED)    scoreReward = -1;
+
+        // Distance signal
+        float distanceReward = 1.0 / (1.0 + house.distanceToButton(fired));
+
+        return scoreReward * 0.8 + distanceReward * 0.2 + allyKnockout + enemyKnockout;
+    }
+}
 class PolicySearchTraining {
     NeuralPolicy current;
     NeuralPolicy mutated;
@@ -108,9 +165,11 @@ class PolicySearchTraining {
             randomState.randomize(stones, STONES_PER_TEAM);
 
             // Build state and predict shot (1 yellow stone left to throw, then game ends)
-            float[] state = current.convertState(stones, 1, TEAM_RED);
-            currentScoreSum += heuristic.simulateShot(current, state, stones);
-            mutatedScoreSum += heuristic.simulateShot(mutated, state, stones);
+            //float[] state = current.convertState(stones, 1, TEAM_RED);
+            float[] currentState = current.convertState(stones, 1, TEAM_RED);
+            float[] mutatedState = mutated.convertState(stones, 1, TEAM_RED);
+            currentScoreSum += heuristic.simulateShot(current, currentState, stones);
+            mutatedScoreSum += heuristic.simulateShot(mutated, mutatedState, stones);
         }
 
         if (mutatedScoreSum > currentScoreSum) {

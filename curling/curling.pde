@@ -87,7 +87,8 @@ void draw() {
   background(20);
 
   if (appMode == AppMode.TRAINING && trainingActive) {
-    trainer.comparePolicies(new CloseToButtonHeuristic());
+    //trainer.comparePolicies(new CloseToButtonHeuristic());
+    trainer.comparePolicies(new CombinedHeuristic());
     trainingDone++;
     if (trainingDone >= trainingTarget) {
       trainingActive = false;

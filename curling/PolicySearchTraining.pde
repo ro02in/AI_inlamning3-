@@ -46,6 +46,11 @@ class PolicySearchTraining {
         challengeSetIndex = 0;
     }
 
+    void setPolicy(NeuralPolicy p) {
+        if (p == null) return;
+        current = p;
+    }
+
     ArrayList<Stone> copyLayout(ArrayList<Stone> layout) {
         ArrayList<Stone> copy = new ArrayList<Stone>();
         for (Stone s : layout) {

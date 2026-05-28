@@ -22,11 +22,38 @@ class NeuralPolicy {
     // When true the policy outputs (μ, log σ) per action dimension and
     // supports sample() for stochastic training.
     boolean meanAndStd = false;
+    int lastLoadedUpdateCount = -1; // set by loadFromLines()
 
-    // Log-std clamp to keep σ in a sensible range during gradient training.
-    // σ = exp(logStd), so clamp logStd to [-3, 1] → σ ∈ [0.05, 2.72].
-    static final float LOG_STD_MIN = -3.0f;
-    static final float LOG_STD_MAX =  1.0f;
+    // Log-std clamp: σ = exp(logStd). Per-dimension minimum σ (in tanh space for curl/speed;
+    // angle min is converted from degrees using this policy's angle span).
+    static final float MIN_STD_CURL_TANH  = 0.15f;
+    static final float MIN_STD_SPEED_TANH = 0.20f;
+    static final float MIN_STD_ANGLE_DEG  = 0.50f;
+    static final float LOG_STD_MAX        =  1.0f;  // σ ≤ ~2.72
+
+    // Minimum σ in tanh space for action dimension i (0=curl, 1=speed, 2=angle).
+    float minStdTanh(int dim) {
+        if (dim == 0) return MIN_STD_CURL_TANH;
+        if (dim == 1) return MIN_STD_SPEED_TANH;
+        float span = max(1f, angleSpanDeg());
+        return MIN_STD_ANGLE_DEG / (0.5f * span);
+    }
+
+    float logStdMin(int dim) {
+        return log(minStdTanh(dim));
+    }
+
+    float clampLogStd(int dim, float logStd) {
+        return constrain(logStd, logStdMin(dim), LOG_STD_MAX);
+    }
+
+    float sigmaFromLogStd(int dim, float logStd) {
+        return exp(clampLogStd(dim, logStd));
+    }
+
+    boolean logStdAtMin(int dim, float logStd) {
+        return logStd <= logStdMin(dim) + 1e-4f;
+    }
 
     NeuronLayer hiddenLayer;
     NeuronLayer outputLayer;    // 3 neurons for deterministic policy or 3 mean neurons
@@ -55,15 +82,15 @@ class NeuralPolicy {
     // Output ranges are the full defaults; the model learns where to point.
     NeuralPolicy(boolean meanAndStd) {
         this(DEFAULT_MIN_CURL, DEFAULT_MAX_CURL,
-             DEFAULT_MIN_SPEED, DEFAULT_MAX_SPEED,
-             DEFAULT_MIN_ANGLE_DEG, DEFAULT_MAX_ANGLE_DEG,
-             meanAndStd);
+            DEFAULT_MIN_SPEED, DEFAULT_MAX_SPEED,
+            DEFAULT_MIN_ANGLE_DEG, DEFAULT_MAX_ANGLE_DEG,
+            meanAndStd);
     }
 
     NeuralPolicy(float minCurl, float maxCurl,
-                 float minSpeed, float maxSpeed,
-                 float minAngleDeg, float maxAngleDeg,
-                 boolean meanAndStd) {
+                float minSpeed, float maxSpeed,
+                float minAngleDeg, float maxAngleDeg,
+                boolean meanAndStd) {
         this.minCurl      = minCurl;
         this.maxCurl      = maxCurl;
         this.minSpeed     = minSpeed;
@@ -86,7 +113,23 @@ class NeuralPolicy {
     }
 
     NeuralPolicy expertDraw(boolean meanAndStd) {
-        return new NeuralPolicy(-0.2f, 0.2f, 18f, 26f, -3f, 3f, meanAndStd);
+        return new NeuralPolicy(-0.1f, 0.1f, 18f, 26f, -3f, 3f, meanAndStd);
+    }
+
+    NeuralPolicy expertDrawCurlRight() {
+        return expertDrawCurlRight(false);
+    }
+
+    NeuralPolicy expertDrawCurlRight(boolean meanAndStd) {
+        return new NeuralPolicy(0.1f, 0.35f, 18f, 26f, -5f, 1f, meanAndStd);
+    }
+
+    NeuralPolicy expertDrawCurlLeft() {
+        return expertDrawCurlLeft(false);
+    }
+
+    NeuralPolicy expertDrawCurlLeft(boolean meanAndStd) {
+        return new NeuralPolicy(-0.35f, -0.1f, 18f, 26f, -1f, 5f, meanAndStd);
     }
 
     NeuralPolicy expertCurlRight() {
@@ -172,7 +215,7 @@ class NeuralPolicy {
 
         float[] actions = new float[3];
         for (int i = 0; i < 3; i++) {
-            float sigma  = exp(constrain(logStds[i], LOG_STD_MIN, LOG_STD_MAX));
+            float sigma  = sigmaFromLogStd(i, logStds[i]);
             actions[i]   = constrain(means[i] + sigma * randomGaussian(), -1f, 1f);
         }
 
@@ -188,8 +231,7 @@ class NeuralPolicy {
     float[] logProbGradients(float[] means, float[] logStds, float[] actionRaw) {
         float[] grad = new float[6];
         for (int i = 0; i < 3; i++) {
-            float logStdClamped = constrain(logStds[i], LOG_STD_MIN, LOG_STD_MAX);
-            float sigma  = exp(logStdClamped);
+            float sigma  = sigmaFromLogStd(i, logStds[i]);
             float sigma2 = sigma * sigma;
             float diff   = actionRaw[i] - means[i];
 
@@ -334,5 +376,93 @@ class NeuralPolicy {
         state[i++] = stonesLeft / (float) STONES_PER_TEAM;
         state[i] = lastStoneTeam == TEAM_RED ? 1 : -1;
         return state;
+    }
+
+    // ---- File I/O ----
+
+    void appendSave(StringBuilder sb, String expertName, int updateCount) {
+        sb.append("@policy ").append(expertName).append('\n');
+        sb.append("mean_and_std=").append(meanAndStd ? 1 : 0).append('\n');
+        sb.append("min_curl=").append(minCurl).append('\n');
+        sb.append("max_curl=").append(maxCurl).append('\n');
+        sb.append("min_speed=").append(minSpeed).append('\n');
+        sb.append("max_speed=").append(maxSpeed).append('\n');
+        sb.append("min_angle_deg=").append(minAngleDeg).append('\n');
+        sb.append("max_angle_deg=").append(maxAngleDeg).append('\n');
+        if (updateCount >= 0) {
+            sb.append("update_count=").append(updateCount).append('\n');
+        }
+        hiddenLayer.appendSave(sb, "hidden");
+        outputLayer.appendSave(sb, "output");
+        if (meanAndStd && outputLogStd != null) {
+            outputLogStd.appendSave(sb, "logstd");
+        }
+        sb.append("@end\n");
+    }
+
+    // Load one @policy ... @end block starting at lines[startIdx]. Returns index after @end.
+    int loadFromLines(String[] lines, int startIdx) {
+        int idx = startIdx;
+        if (idx >= lines.length || !trim(lines[idx]).startsWith("@policy ")) return startIdx;
+
+        boolean meanStdFlag = meanAndStd;
+        float mc = minCurl, xc = maxCurl;
+        float ms = minSpeed, xs = maxSpeed;
+        float ma = minAngleDeg, xa = maxAngleDeg;
+        lastLoadedUpdateCount = -1;
+
+        idx++;
+        while (idx < lines.length) {
+            String line = trim(lines[idx]);
+            if (line.length() == 0 || line.startsWith("#")) { idx++; continue; }
+            if (line.equals("@end")) return idx + 1;
+            if (line.startsWith("@policy ")) return idx;
+            if (line.startsWith("@layer ")) break;
+
+            int eq = line.indexOf('=');
+            if (eq <= 0) { idx++; continue; }
+            String key = line.substring(0, eq);
+            String val = line.substring(eq + 1);
+
+            if      (key.equals("mean_and_std"))   meanStdFlag = parseInt(val) != 0;
+            else if (key.equals("min_curl"))       mc = parseFloat(val);
+            else if (key.equals("max_curl"))       xc = parseFloat(val);
+            else if (key.equals("min_speed"))      ms = parseFloat(val);
+            else if (key.equals("max_speed"))      xs = parseFloat(val);
+            else if (key.equals("min_angle_deg"))  ma = parseFloat(val);
+            else if (key.equals("max_angle_deg"))  xa = parseFloat(val);
+            else if (key.equals("update_count"))   lastLoadedUpdateCount = parseInt(val);
+            idx++;
+        }
+
+        minCurl = mc;
+        maxCurl = xc;
+        minSpeed = ms;
+        maxSpeed = xs;
+        minAngleDeg = ma;
+        maxAngleDeg = xa;
+        meanAndStd = meanStdFlag;
+        if (meanAndStd && outputLogStd == null) {
+            outputLogStd = new NeuronLayer(outputSize, hiddenSize, ActivationKind.LINEAR);
+        } else if (!meanAndStd) {
+            outputLogStd = null;
+        }
+
+        NeuronLayer layerLoader = new NeuronLayer(1, 1);
+        while (idx < lines.length) {
+            String line = trim(lines[idx]);
+            if (line.equals("@end")) return idx + 1;
+            if (line.startsWith("@policy ")) return idx;
+            if (line.startsWith("@layer hidden")) {
+                idx = layerLoader.loadFromLines(lines, idx, this, "hidden");
+            } else if (line.startsWith("@layer output")) {
+                idx = layerLoader.loadFromLines(lines, idx, this, "output");
+            } else if (line.startsWith("@layer logstd")) {
+                idx = layerLoader.loadFromLines(lines, idx, this, "logstd");
+            } else {
+                idx++;
+            }
+        }
+        return idx;
     }
 }

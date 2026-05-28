@@ -10,15 +10,15 @@ class GradientEnsemble {
     GradientEnsemble() {
         NeuralPolicy seed = new NeuralPolicy();
         names = new String[]{
-            "Draw", "CurlR", "CurlL", "Takeout", "Guard", "Freeze"
+            "Draw", "DrawCurlR", "DrawCurlL", "CurlR", "CurlL", "Takeout"
         };
         NeuralPolicy[] seeds = {
             seed.expertDraw(true),
+            seed.expertDrawCurlRight(true),
+            seed.expertDrawCurlLeft(true),
             seed.expertCurlRight(true),
             seed.expertCurlLeft(true),
-            seed.expertTakeout(true),
-            seed.expertGuard(true),
-            seed.expertFreeze(true)
+            seed.expertTakeout(true)
         };
         count = seeds.length;
         trainers = new PolicyGradientTraining[count];

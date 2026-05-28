@@ -16,7 +16,7 @@ class PolicyGradientTraining {
     int   shotsPerUpdate  = 50;
     float eliteFraction   = 0.10f;
     float learningRate    = 0.001f;
-    float entropyBonus    = 0.01f;
+    float entropyBonus    = 0.04f;  // H[π] coefficient — fights σ collapse (was 0.01)
     int   logEvery        = 100;  // print training diagnostics every N update steps
 
     int updateCount = 0;
@@ -44,6 +44,12 @@ class PolicyGradientTraining {
         updateCount = 0;
     }
 
+    void setPolicy(NeuralPolicy p, int loadedUpdateCount) {
+        if (p == null) return;
+        policy = p;
+        if (loadedUpdateCount >= 0) updateCount = loadedUpdateCount;
+    }
+
     // Run one gradient update on a fresh random board state.
     void updateStep(ArrayList<Heuristic> heuristics) {
         if (heuristics == null || heuristics.isEmpty()) return;
@@ -60,8 +66,7 @@ class PolicyGradientTraining {
 
         float[] sigmas = new float[3];
         for (int i = 0; i < 3; i++) {
-            float ls = constrain(logStds[i], NeuralPolicy.LOG_STD_MIN, NeuralPolicy.LOG_STD_MAX);
-            sigmas[i] = exp(ls);
+            sigmas[i] = policy.sigmaFromLogStd(i, logStds[i]);
         }
 
         // 3. Sample N actions directly from N(μ, σ) — no feedForward calls.
@@ -144,9 +149,14 @@ class PolicyGradientTraining {
             }
         }
 
-        // Entropy bonus: pushes log σ upward to prevent mode collapse.
+        // Entropy bonus: +dH/d(log σ) = +1 per dim. At σ floor, block REINFORCE from
+        // pushing log σ lower so exploration minimum is preserved.
         for (int i = 0; i < 3; i++) {
-            gradLogStd[i] += entropyBonus;
+            if (policy.logStdAtMin(i, logStds[i])) {
+                gradLogStd[i] = max(gradLogStd[i], 0) + entropyBonus;
+            } else {
+                gradLogStd[i] += entropyBonus;
+            }
         }
 
         // 8. Backprop through the network (uses stored forward-pass state).

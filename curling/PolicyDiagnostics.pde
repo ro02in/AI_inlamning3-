@@ -36,11 +36,10 @@ class PolicyDiagnostics {
         : "";
     String sigmaStr = "";
     if (policy.meanAndStd && logStds != null) {
-      float ls0 = constrain(logStds[0], NeuralPolicy.LOG_STD_MIN, NeuralPolicy.LOG_STD_MAX);
-      float ls1 = constrain(logStds[1], NeuralPolicy.LOG_STD_MIN, NeuralPolicy.LOG_STD_MAX);
-      float ls2 = constrain(logStds[2], NeuralPolicy.LOG_STD_MIN, NeuralPolicy.LOG_STD_MAX);
-      sigmaStr = "  σ=" + nf(exp(ls0), 0, 3) + "/" + nf(exp(ls1), 0, 3)
-               + "/" + nf(exp(ls2), 0, 3);
+      float s0 = policy.sigmaFromLogStd(0, logStds[0]);
+      float s1 = policy.sigmaFromLogStd(1, logStds[1]);
+      float s2 = policy.sigmaFromLogStd(2, logStds[2]);
+      sigmaStr = "  σ=" + nf(s0, 0, 3) + "/" + nf(s1, 0, 3) + "/" + nf(s2, 0, 3);
     }
     println("  " + name
             + "  curl=" + nf(shot.curl, 0, 3)

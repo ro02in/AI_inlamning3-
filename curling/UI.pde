@@ -256,6 +256,8 @@ class UI {
   Button     trainBtn;
   Button     testBtn;
   Button     resetModelBtn;
+  Button     saveModelBtn;
+  Button     loadModelBtn;
   Button     penaltyHeuristicBtn;
   Button     pinHeuristicBtn;
   Button     scoreHeuristicBtn;
@@ -345,6 +347,7 @@ class UI {
 
     float btnW = SIDEBAR_W - 40;
     float halfW = (btnW - 6) * 0.5f;
+    float quarterW = (btnW - 6 * 3) / 4.0f;
     float halfX = ICE_W + (SIDEBAR_W - btnW) * 0.5f;
     shootBtn = new Button("L\u00e5s vinkel",
                           halfX,
@@ -362,11 +365,19 @@ class UI {
     resetModelBtn = new Button("Ny modell",
                                halfX,
                                EXTRA_BTN_TOP,
-                               halfW, 36);
-    rndStateBtn = new Button("Random state",
-                             halfX + halfW + 6,
+                               quarterW, 36);
+    saveModelBtn = new Button("Spara",
+                              halfX + quarterW + 6,
+                              EXTRA_BTN_TOP,
+                              quarterW, 36);
+    loadModelBtn = new Button("Ladda",
+                              halfX + (quarterW + 6) * 2,
+                              EXTRA_BTN_TOP,
+                              quarterW, 36);
+    rndStateBtn = new Button("Random",
+                             halfX + (quarterW + 6) * 3,
                              EXTRA_BTN_TOP,
-                             halfW, 36);
+                             quarterW, 36);
     datasetBtn = new Button("Expert dataset",
                             halfX,
                             DATASET_BTN_TOP,
@@ -556,6 +567,12 @@ class UI {
     resetModelBtn.label   = "Ny modell";
     resetModelBtn.enabled = controlsEnabled && appMode != AppMode.TEST;
     resetModelBtn.draw();
+
+    saveModelBtn.enabled = controlsEnabled && appMode != AppMode.TEST
+                        && appMode != AppMode.TRAINING;
+    loadModelBtn.enabled = saveModelBtn.enabled;
+    saveModelBtn.draw();
+    loadModelBtn.draw();
 
     rndStateBtn.enabled = controlsEnabled && appMode == AppMode.PLAY;
     rndStateBtn.draw();
@@ -941,6 +958,14 @@ class UI {
       resetTrainingModel();
       return;
     }
+    if (saveModelBtn.enabled && saveModelBtn.hits(mx, my)) {
+      promptSaveModel();
+      return;
+    }
+    if (loadModelBtn.enabled && loadModelBtn.hits(mx, my)) {
+      promptLoadModel();
+      return;
+    }
     if (appMode != AppMode.TRAINING && appMode != AppMode.TEST
         && appMode != AppMode.RECORD) {
       if (penaltyHeuristicBtn.hits(mx, my)) {
@@ -1033,6 +1058,8 @@ class UI {
     trainBtn.hover = trainBtn.hits(mx, my);
     testBtn.hover  = testBtn.hits(mx, my);
     resetModelBtn.hover = resetModelBtn.hits(mx, my);
+    saveModelBtn.hover = saveModelBtn.hits(mx, my);
+    loadModelBtn.hover  = loadModelBtn.hits(mx, my);
     datasetBtn.hover = datasetBtn.hits(mx, my);
     expertNextBtn.hover = expertNextBtn.hits(mx, my);
     expertNewBtn.hover  = expertNewBtn.hits(mx, my);

@@ -9,10 +9,12 @@ class RandomState{
     void randomize(ArrayList<Stone> stones, int stonesPerTeam) {
         stones.clear();
         for (int i = 0; i < stonesPerTeam; i++){
-            placeStone(stones, TEAM_RED);
+            if (random(1) > 0.3) // 70% chance of being in play
+              placeStone(stones, TEAM_RED);
         }
         for (int i = 0; i < stonesPerTeam - 1; i++){
-          placeStone(stones, TEAM_YELLOW);
+          if (random(1) > 0.3) // 70% chance of being in play
+            placeStone(stones, TEAM_YELLOW);
         }
     }
 

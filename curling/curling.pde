@@ -62,6 +62,7 @@ PenaltyHeuristic penaltyHeuristic;
 ExpertShotHeuristic expertHeuristic;
 TrainingPreview    trainingPreview;
 PolicyDiagnostics  policyDiagnostics;
+ModelStorage       modelStorage;
 
 int  trainingTarget = 100;
 int  trainingDone   = 0;
@@ -112,6 +113,7 @@ void setup() {
   expertHeuristic  = new ExpertShotHeuristic();
   trainingPreview  = new TrainingPreview();
   policyDiagnostics = new PolicyDiagnostics();
+  modelStorage      = new ModelStorage();
   expertShots      = new ExpertShotDataset();
 }
 
@@ -314,6 +316,36 @@ void resetTrainingModel() {
   trainingDone   = 0;
   trainingTarget = 0;
   trainingStatus = "Ny modell";
+}
+
+void promptSaveModel() {
+  if (trainingActive || appMode == AppMode.TRAINING) return;
+  selectOutput("Spara modell", "onSaveModelSelected",
+               new File(modelStorage.defaultSavePath()));
+}
+
+void onSaveModelSelected(File selection) {
+  if (selection == null) return;
+  String path = selection.getAbsolutePath();
+  if (!path.toLowerCase().endsWith(".curlmodel")) {
+    path += ".curlmodel";
+  }
+  modelStorage.saveActiveModel(path);
+  trainingStatus = modelStorage.lastMessage;
+}
+
+void promptLoadModel() {
+  if (trainingActive || appMode == AppMode.TRAINING) return;
+  selectInput("Ladda modell", "onLoadModelSelected");
+}
+
+void onLoadModelSelected(File selection) {
+  if (selection == null) return;
+  if (modelStorage.loadActiveModel(selection.getAbsolutePath())) {
+    trainingStatus = modelStorage.lastMessage;
+  } else {
+    trainingStatus = modelStorage.lastMessage;
+  }
 }
 
 void startAiTest() {

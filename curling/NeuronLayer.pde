@@ -130,4 +130,59 @@ class NeuronLayer {
         }
         return clone;
     }
+
+    String activationName(ActivationKind kind) {
+        switch (kind) {
+            case RELU:   return "RELU";
+            case LINEAR: return "LINEAR";
+            default:     return "TANH";
+        }
+    }
+
+    ActivationKind parseActivation(String name) {
+        if (name == null) return ActivationKind.TANH;
+        if (name.equals("RELU"))   return ActivationKind.RELU;
+        if (name.equals("LINEAR")) return ActivationKind.LINEAR;
+        return ActivationKind.TANH;
+    }
+
+    void appendSave(StringBuilder sb, String layerTag) {
+        sb.append("@layer ").append(layerTag).append(' ')
+          .append(activationName(neurons[0].activation)).append(' ')
+          .append(neurons.length).append(' ')
+          .append(neurons[0].weights.length).append('\n');
+        for (Neuron n : neurons) {
+            n.appendSaveLine(sb);
+        }
+    }
+
+    // Parse @layer line at lines[idx] and following neuron lines. Returns index after layer.
+    int loadFromLines(String[] lines, int idx, NeuralPolicy policy,
+                      String expectedTag) {
+        if (idx >= lines.length) return idx;
+        String header = trim(lines[idx]);
+        if (!header.startsWith("@layer ")) return idx;
+
+        String[] parts = split(header, ' ');
+        if (parts.length < 5) return idx + 1;
+        String tag = parts[1];
+        if (!tag.equals(expectedTag)) return idx + 1;
+
+        ActivationKind act = parseActivation(parts[2]);
+        int neuronCount = parseInt(parts[3]);
+        int inputCount  = parseInt(parts[4]);
+
+        NeuronLayer layer = new NeuronLayer(neuronCount, inputCount, act);
+        idx++;
+        Neuron parser = new Neuron(inputCount, act);
+        for (int i = 0; i < neuronCount && idx < lines.length; i++, idx++) {
+            Neuron n = parser.createFromLine(lines[idx]);
+            if (n != null) layer.neurons[i] = n;
+        }
+
+        if (expectedTag.equals("hidden"))  policy.hiddenLayer = layer;
+        else if (expectedTag.equals("output")) policy.outputLayer = layer;
+        else if (expectedTag.equals("logstd")) policy.outputLogStd = layer;
+        return idx;
+    }
 }

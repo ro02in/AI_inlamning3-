@@ -1,12 +1,14 @@
 class PolicySearchTraining {
     NeuralPolicy current;
     int   mutationsPerComparison = 5;
-    float amountChallengeSet = 0.5; // 0..1, fraction of shots drawn from the fixed challenge set
+    float amountChallengeSet = 0.3; // 0..1, fraction of shots drawn from the fixed challenge set
     float mutationRate       = 0.08;
-    float mutationStrength   = 0.04;
+    float mutationStrength   = 0.07;
     // L2 penalty per comparison: subtracted from each policy's score proportional to sum(w^2).
     // Prevents weights drifting to the clip ceiling. Raise if saturation still grows; lower if model stops improving.
-    float weightDecay        = 0.02;
+    float weightDecay        = 0.04;
+    // Penalise collapsed hidden layers (pre-activation <= 0). Applied as penalty * deadFrac^2.
+    float deadNeuronPenalty  = 3.0f;
     ArrayList<Stone>   stones = new ArrayList<Stone>();
     ArrayList<Stone>[] challengeSet;
     int challengeSetSize  = 0;
@@ -14,9 +16,16 @@ class PolicySearchTraining {
 
     RandomState randomState = new RandomState();
     ShotSimilarityPenalty shotSimilarity = new ShotSimilarityPenalty();
+    SituationLibrary situationLibrary;
 
     PolicySearchTraining() {
+        this(new SituationLibrary());
+    }
+
+    PolicySearchTraining(SituationLibrary library) {
+        this.situationLibrary = library;
         current = new NeuralPolicy();
+        situationLibrary.reloadFromDisk();
     }
 
     void reset() {
@@ -73,15 +82,46 @@ class PolicySearchTraining {
         }
 
         float currentScore = 0;
+        float currentDeadAccum = 0;
+        float[] candidateDeadAccum = new float[mutationsPerComparison];
+        int layoutCount = 0;
 
         // Use first heuristic's shotsPerComparison as the layout budget.
-        int randomShots = heuristics.get(0).shotsPerComparison - challengeSetSize;
+        int fixedCount  = situationLibrary.count();
+        int randomShots = heuristics.get(0).shotsPerComparison - challengeSetSize - fixedCount;
         if (randomShots < 0) randomShots = 0;
+
+        // --- Fixed designed situations (always trained) ---
+        for (int f = 0; f < fixedCount; f++) {
+            ArrayList<Stone> layout = situationLibrary.layoutCopy(f);
+            float[] state = current.convertState(layout, 1, TEAM_RED);
+            layoutCount++;
+            currentDeadAccum += current.deadHiddenFraction(state);
+            for (int m = 0; m < mutationsPerComparison; m++) {
+                candidateDeadAccum[m] += candidates[m].deadHiddenFraction(state);
+            }
+
+            ShotResult currentResult = heuristics.get(0).simulate(current, state, layout);
+            float layoutScore = combinedScore(heuristics, currentResult);
+            currentShots.add(currentResult.plannedShot);
+            currentScore += layoutScore;
+
+            for (int m = 0; m < mutationsPerComparison; m++) {
+                ShotResult cr = heuristics.get(0).simulate(candidates[m], state, layout);
+                candidateScores[m] += combinedScore(heuristics, cr);
+                candidateShots[m].add(cr.plannedShot);
+            }
+        }
 
         // --- Random layouts ---
         for (int j = 0; j < randomShots; j++) {
             randomState.randomize(stones, STONES_PER_TEAM);
             float[] state = current.convertState(stones, 1, TEAM_RED);
+            layoutCount++;
+            currentDeadAccum += current.deadHiddenFraction(state);
+            for (int m = 0; m < mutationsPerComparison; m++) {
+                candidateDeadAccum[m] += candidates[m].deadHiddenFraction(state);
+            }
 
             // Simulate once per policy, then score cheaply with every heuristic.
             ShotResult currentResult = heuristics.get(0).simulate(current, state, stones);
@@ -105,6 +145,11 @@ class PolicySearchTraining {
         for (int h = 0; h < challengeSetSize; h++) {
             ArrayList<Stone> layout = challengeSet[h];
             float[] state = current.convertState(layout, 1, TEAM_RED);
+            layoutCount++;
+            currentDeadAccum += current.deadHiddenFraction(state);
+            for (int m = 0; m < mutationsPerComparison; m++) {
+                candidateDeadAccum[m] += candidates[m].deadHiddenFraction(state);
+            }
 
             ShotResult currentResult = heuristics.get(0).simulate(current, state, layout);
             float currentLayoutScore = combinedScore(heuristics, currentResult);
@@ -131,6 +176,15 @@ class PolicySearchTraining {
         currentScore -= weightDecay * current.weightL2();
         for (int m = 0; m < mutationsPerComparison; m++) {
             candidateScores[m] -= weightDecay * candidates[m].weightL2();
+        }
+
+        if (layoutCount > 0) {
+            float deadFrac = currentDeadAccum / layoutCount;
+            currentScore -= deadNeuronPenalty * deadFrac * deadFrac;
+            for (int m = 0; m < mutationsPerComparison; m++) {
+                float frac = candidateDeadAccum[m] / layoutCount;
+                candidateScores[m] -= deadNeuronPenalty * frac * frac;
+            }
         }
 
         // Keep best candidate if it beats current.

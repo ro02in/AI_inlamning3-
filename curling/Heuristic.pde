@@ -83,7 +83,7 @@ class ScoreHeuristic extends Heuristic {
 class CloseToButtonHeuristic extends Heuristic {
     CloseToButtonHeuristic() {
         this.shotsPerComparison = 30;
-        this.scale = 50.0;
+        this.scale = 30.0;
         this.weight = 0.8;
     }
 
@@ -102,7 +102,7 @@ class CloseToButtonHeuristic extends Heuristic {
 class PenaltyHeuristic extends Heuristic {
     PenaltyHeuristic() {
         this.shotsPerComparison = 30;
-        this.scale = 50.0;
+        this.scale = 30.0;
         this.weight = 1.2;
     }
 

@@ -92,6 +92,12 @@ class Sheet {
     return ft * pxPerFt;
   }
 
+  PVector screenToWorld(float sx, float sy) {
+    float wx = (sx - iceOffsetX) / pxPerFt;
+    float wy = yMax - (sy - iceOffsetY) / pxPerFt;
+    return new PVector(wx, wy);
+  }
+
   void drawSheet() {
     pushStyle();
     rectMode(CORNER);

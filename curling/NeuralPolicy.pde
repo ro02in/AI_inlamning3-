@@ -7,22 +7,50 @@ class NeuralPolicy {
     NeuronLayer outputLayer;
 
     NeuralPolicy() {
-        hiddenLayer = new NeuronLayer(hiddenSize, inputSize, false);
-        outputLayer = new NeuronLayer(outputSize, hiddenSize, false); // tanh on both layers; output capped in predict
+        // Hidden: leaky ReLU, smaller weights, bias floor at 0 keeps neurons alive.
+        hiddenLayer = new NeuronLayer(hiddenSize, inputSize, Neuron.ACT_LEAKY_RELU,
+                                      0.4f, 0.0f, 0.5f);
+        outputLayer = new NeuronLayer(outputSize, hiddenSize, Neuron.ACT_LINEAR,
+                                      0.6f, -0.6f, 0.6f);
+    }
+
+    // Fraction of hidden neurons with pre-activation <= 0 on this layout.
+    float deadHiddenFraction(float[] state) {
+        int dead = 0;
+        for (Neuron n : hiddenLayer.neurons) {
+            if (n.preActivation(state) <= 0) dead++;
+        }
+        return dead / (float) hiddenLayer.neurons.length;
+    }
+
+    float[] hiddenPreActivations(float[] state) {
+        float[] pre = new float[hiddenLayer.neurons.length];
+        for (int i = 0; i < hiddenLayer.neurons.length; i++) {
+            pre[i] = hiddenLayer.neurons[i].preActivation(state);
+        }
+        return pre;
     }
 
     Shot predict(float[] state) {
         float[] hiddenOutputs = hiddenLayer.feedForward(state);
-        float[] outputValues = outputLayer.feedForward(hiddenOutputs);
+        float[] rawOutputs = outputLayer.feedForward(hiddenOutputs);
 
-        // All three outputs are tanh → [-1, 1].
-        // curl stays as-is; speed maps [-1,1] → [MIN,MAX]; angle maps to ±10°.
         float MIN_SPEED = UI.SPEED_MAX * 0.2f;
 
-        float curl  = outputValues[0];
-        float speed = MIN_SPEED + ((outputValues[1] + 1) / 2.0) * (UI.SPEED_MAX - MIN_SPEED);
-        float angle = outputValues[2] * PI / 18;
+        float curl  = (float) Math.tanh(rawOutputs[0]);
+        float speed = MIN_SPEED + (( (float) Math.tanh(rawOutputs[1]) + 1) / 2.0) * (UI.SPEED_MAX - MIN_SPEED);
+        float angle = (float) Math.tanh(rawOutputs[2]) * PI / 18;
         return new Shot(curl, speed, angle);
+    }
+
+    float[] outputActivations(float[] state) {
+        float[] hidden = hiddenLayer.feedForward(state);
+        float[] raw = outputLayer.feedForward(hidden);
+        return new float[] {
+            (float) Math.tanh(raw[0]),
+            (float) Math.tanh(raw[1]),
+            (float) Math.tanh(raw[2])
+        };
     }
 
     void mutate(float mutationRate, float mutationStrength) {

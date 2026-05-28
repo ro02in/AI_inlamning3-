@@ -7,18 +7,24 @@ class PolicyDiagnostics {
 
     float[] state = policy.convertState(layout, stonesLeft, lastStoneTeam);
     float[] hidden  = policy.hiddenLayer.feedForward(state);
-    float[] outputs = policy.outputLayer.feedForward(hidden);
+    float[] preHidden = policy.hiddenPreActivations(state);
+    float[] rawOut  = policy.outputLayer.feedForward(hidden);
+    float[] outputs = policy.outputActivations(state);
     Shot shot = policy.predict(state);
 
     println("========== AI TEST DIAGNOSTICS ==========");
     logLayout(layout);
     logStateVector(state);
     logActivations("hidden", hidden);
-    logActivations("output", outputs);
-    logShot(outputs, shot);
+    logActivations("hidden pre-activation", preHidden);
+    logActivations("output (raw linear)", rawOut);
+    logActivations("output (tanh)", outputs);
+    logShot(rawOut, outputs, shot);
     logLayerStats("hidden", policy.hiddenLayer);
     logLayerStats("output", policy.outputLayer);
-    logSaturation(hidden, "hidden");
+    logSaturation(hidden, "hidden", policy.hiddenLayer.activation);
+    logDeadHidden(preHidden);
+    logSaturation(outputs, "output", Neuron.ACT_TANH);
     println("=========================================");
   }
 
@@ -64,11 +70,14 @@ class PolicyDiagnostics {
     println(line.toString());
   }
 
-  void logShot(float[] rawOutputs, Shot shot) {
+  void logShot(float[] rawOutputs, float[] tanhOutputs, Shot shot) {
     println("-- shot --");
     println("  raw curl=" + nf(rawOutputs[0], 0, 4)
             + "  raw speed=" + nf(rawOutputs[1], 0, 4)
             + "  raw angle=" + nf(rawOutputs[2], 0, 4));
+    println("  tanh curl=" + nf(tanhOutputs[0], 0, 4)
+            + "  tanh speed=" + nf(tanhOutputs[1], 0, 4)
+            + "  tanh angle=" + nf(tanhOutputs[2], 0, 4));
     println("  curl=" + nf(shot.curl, 0, 4)
             + "  speed=" + nf(shot.speed, 0, 2)
             + "  angleDeg=" + nf(degrees(shot.angle), 0, 2));
@@ -100,7 +109,30 @@ class PolicyDiagnostics {
             + "  bMean=" + nf(bSum / layer.neurons.length, 0, 4));
   }
 
-  void logSaturation(float[] activations, String name) {
+  void logDeadHidden(float[] preActivations) {
+    int dead = 0;
+    for (float v : preActivations) {
+      if (v <= 0) dead++;
+    }
+    float pct = 100.0f * dead / preActivations.length;
+    println("-- hidden dead (pre<=0): "
+            + dead + "/" + preActivations.length
+            + " (" + nf(pct, 0, 1) + "%)");
+  }
+
+  void logSaturation(float[] activations, String name, int activation) {
+    if (activation == Neuron.ACT_RELU || activation == Neuron.ACT_LEAKY_RELU) {
+      int inactive = 0;
+      int hot      = 0;
+      for (float v : activations) {
+        if (v <= 0.001f) inactive++;
+        if (v > 2.0f) hot++;
+      }
+      println("-- " + name + " ReLU stats: inactive=" + inactive + "/" + activations.length
+              + "  hot(>2)=" + hot + "/" + activations.length);
+      return;
+    }
+
     int saturated = 0;
     for (float v : activations) {
       if (abs(v) > 0.9) saturated++;

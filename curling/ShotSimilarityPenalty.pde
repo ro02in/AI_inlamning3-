@@ -44,7 +44,7 @@ class ShotSimilarityPenalty {
         float signScore = 0;
         if (penaliseSameSign) {
             if (positive == values.length || negative == values.length) {
-                signScore = 1.0f; // always curl/angle the same direction
+                signScore = 1.5f; // always curl/angle the same direction
             } else if (positive == 0 && negative == 0) {
                 signScore = 0.3f; // always near zero — mild penalty
             }

@@ -252,6 +252,7 @@ class UI {
   Button     trainBtn;
   Button     testBtn;
   Button     resetModelBtn;
+  Button     designerBtn;
   Button     penaltyHeuristicBtn;
   Button     pinHeuristicBtn;
   Button     scoreHeuristicBtn;
@@ -340,10 +341,14 @@ class UI {
                                halfX,
                                EXTRA_BTN_TOP,
                                halfW, 36);
-    rndStateBtn = new Button("Random state",
+    designerBtn = new Button("Situation",
                              halfX + halfW + 6,
                              EXTRA_BTN_TOP,
                              halfW, 36);
+    rndStateBtn = new Button("Random state",
+                             halfX,
+                             EXTRA_BTN_TOP + 42,
+                             btnW, 32);
 
     float hx = ICE_W + 20;
     float hgap = 4;
@@ -410,10 +415,16 @@ class UI {
   }
 
   void draw() {
+    if (appMode == AppMode.DESIGN) {
+      drawSidebarBackdrop();
+      situationDesigner.drawSidebar();
+      return;
+    }
+
     drawStatsPanel();
     drawAiPanel();
 
-    boolean controlsEnabled = appMode != AppMode.TRAINING;
+    boolean controlsEnabled = appMode != AppMode.TRAINING && appMode != AppMode.DESIGN;
     curlSlider.draw();
     speedSlider.draw();
     angleSlider.draw();
@@ -438,6 +449,9 @@ class UI {
     rndStateBtn.enabled = controlsEnabled && appMode == AppMode.PLAY;
     rndStateBtn.draw();
 
+    designerBtn.enabled = controlsEnabled && appMode == AppMode.PLAY;
+    designerBtn.draw();
+
     trainBtn.label   = trainingActive ? "Avbryt" : "Trana";
     trainBtn.enabled = appMode != AppMode.TEST
                       && (trainingActive || controlsEnabled);
@@ -458,7 +472,7 @@ class UI {
   }
 
   void drawHeuristicButtons() {
-    boolean canPick = appMode != AppMode.TRAINING && appMode != AppMode.TEST;
+    boolean canPick = appMode != AppMode.TRAINING && appMode != AppMode.TEST && appMode != AppMode.DESIGN;
     drawHeuristicButton(penaltyHeuristicBtn, trainPenaltyEnabled, canPick);
     drawHeuristicButton(pinHeuristicBtn, trainPinEnabled, canPick);
     drawHeuristicButton(scoreHeuristicBtn, trainScoreEnabled, canPick);
@@ -688,7 +702,11 @@ class UI {
       resetTrainingModel();
       return;
     }
-    if (appMode != AppMode.TRAINING && appMode != AppMode.TEST) {
+    if (designerBtn.enabled && designerBtn.hits(mx, my)) {
+      startSituationDesigner();
+      return;
+    }
+    if (appMode != AppMode.TRAINING && appMode != AppMode.TEST && appMode != AppMode.DESIGN) {
       if (penaltyHeuristicBtn.hits(mx, my)) {
         togglePenaltyHeuristic();
         return;
@@ -707,7 +725,7 @@ class UI {
       else startAiTest();
       return;
     }
-    if (trainBarHit(mx, my) && appMode != AppMode.TRAINING) {
+    if (trainBarHit(mx, my) && appMode != AppMode.TRAINING && appMode != AppMode.DESIGN) {
       draggingTrainBar = true;
       setTrainComparisonsFromMouse(mx);
       return;
@@ -724,7 +742,7 @@ class UI {
     }
 
     activeSlider = null;
-    if (appMode == AppMode.TRAINING || appMode == AppMode.TEST) return;
+    if (appMode == AppMode.TRAINING || appMode == AppMode.TEST || appMode == AppMode.DESIGN) return;
     if      (curlSlider .trackHit(mx, my)) activeSlider = curlSlider;
     else if (speedSlider.trackHit(mx, my)) activeSlider = speedSlider;
     else if (angleSlider.trackHit(mx, my)) activeSlider = angleSlider;
@@ -753,6 +771,7 @@ class UI {
     trainBtn.hover = trainBtn.hits(mx, my);
     testBtn.hover  = testBtn.hits(mx, my);
     resetModelBtn.hover = resetModelBtn.hits(mx, my);
+    designerBtn.hover   = designerBtn.hits(mx, my);
     penaltyHeuristicBtn.hover = penaltyHeuristicBtn.hits(mx, my);
     pinHeuristicBtn.hover = pinHeuristicBtn.hits(mx, my);
     scoreHeuristicBtn.hover = scoreHeuristicBtn.hits(mx, my);

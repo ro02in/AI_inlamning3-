@@ -38,7 +38,7 @@ final float DT = 1.0 / 60.0;
 boolean DEBUG = false;
 
 // ----- AI training / test ------------------------------------
-enum AppMode { PLAY, TRAINING, TEST }
+enum AppMode { PLAY, TRAINING, TEST, DESIGN }
 
 AppMode appMode = AppMode.PLAY;
 boolean trainPenaltyEnabled = false;
@@ -50,6 +50,8 @@ ScoreHeuristic scoreHeuristic;
 CloseToButtonHeuristic pinHeuristic;
 PenaltyHeuristic penaltyHeuristic;
 TrainingPreview    trainingPreview;
+SituationLibrary   situationLibrary;
+SituationDesigner  situationDesigner;
 
 int  trainingTarget = 100;
 int  trainingDone   = 0;
@@ -86,10 +88,12 @@ void setup() {
   ui      = new UI();
   game    = new Game();
 
-  trainer       = new PolicySearchTraining();
+  trainer          = new PolicySearchTraining();
   scoreHeuristic   = new ScoreHeuristic();
   pinHeuristic     = new CloseToButtonHeuristic();
   penaltyHeuristic = new PenaltyHeuristic();
+  situationLibrary = trainer.situationLibrary;
+  situationDesigner = new SituationDesigner(situationLibrary);
   trainingPreview  = new TrainingPreview();
   aiPolicy         = trainer.current.copy();
 }
@@ -123,7 +127,7 @@ void draw() {
   } else if (appMode == AppMode.TEST) {
     updateAiTest();
     ui.update(DT);
-  } else {
+  } else if (appMode != AppMode.DESIGN) {
     physics.step(game.stones, DT);
     game.update();
     maybeAiShoot();
@@ -137,6 +141,8 @@ void draw() {
     drawAiTestOverlay();
   } else if (appMode == AppMode.TRAINING) {
     trainingPreview.drawStones();
+  } else if (appMode == AppMode.DESIGN) {
+    situationDesigner.drawIce();
   } else {
     if (game.state == GameState.AIMING && game.currentTeam == TEAM_RED) {
       drawAimPreview(ui.intendedShot());
@@ -150,12 +156,26 @@ void draw() {
   ui.draw();
   if (appMode == AppMode.TRAINING) trainingPreview.drawOverlay(trainingDone, trainingTarget);
 }
+void startSituationDesigner() {
+  if (trainingActive || appMode == AppMode.TRAINING || appMode == AppMode.TEST) return;
+  appMode = AppMode.DESIGN;
+  situationDesigner.enter();
+}
+
+void stopSituationDesigner() {
+  if (appMode != AppMode.DESIGN) return;
+  situationDesigner.exit();
+  situationLibrary.reloadFromDisk();
+  appMode = AppMode.PLAY;
+}
+
 void startTraining(int comparisons) {
   if (trainingActive) return;
   trainingTarget = trainingDone + comparisons;
   trainingActive = true;
   trainingStatus = "";
   trainingPreview.reset();
+  situationLibrary.reloadFromDisk();
   appMode        = AppMode.TRAINING;
 }
 
@@ -274,10 +294,34 @@ void drawAiTestOverlay() {
 }
 
 // ----- Mouse / keyboard input --------------------------------
-void mousePressed()  { ui.onMousePressed(mouseX, mouseY); }
-void mouseDragged()  { ui.onMouseDragged(mouseX, mouseY); }
-void mouseReleased() { ui.onMouseReleased(mouseX, mouseY); }
-void mouseMoved()    { ui.onMouseMoved(mouseX, mouseY); }
+void mousePressed() {
+  if (appMode == AppMode.DESIGN) {
+    situationDesigner.onMousePressed(mouseX, mouseY);
+    return;
+  }
+  ui.onMousePressed(mouseX, mouseY);
+}
+void mouseDragged() {
+  if (appMode == AppMode.DESIGN) {
+    situationDesigner.onMouseDragged(mouseX, mouseY);
+    return;
+  }
+  ui.onMouseDragged(mouseX, mouseY);
+}
+void mouseReleased() {
+  if (appMode == AppMode.DESIGN) {
+    situationDesigner.onMouseReleased(mouseX, mouseY);
+    return;
+  }
+  ui.onMouseReleased(mouseX, mouseY);
+}
+void mouseMoved() {
+  if (appMode == AppMode.DESIGN) {
+    situationDesigner.updateHover(mouseX, mouseY);
+    return;
+  }
+  ui.onMouseMoved(mouseX, mouseY);
+}
 
 void keyPressed() {
   if (key == ' ') {

@@ -37,9 +37,7 @@ final float DT = 1.0 / 60.0;
 // Toggle with 'd' to show tee and hack markers.
 boolean DEBUG = false;
 
-// AI stuff
-
-NeuralPolicy aiPolicy;
+MonteCarloAI aiPolicy;
 
 // ----- Setup / draw ------------------------------------------
 void settings() {
@@ -59,9 +57,7 @@ void setup() {
   house   = new House();
   ui      = new UI();
   game    = new Game();
-
-  // AI setup
-  aiPolicy = new NeuralPolicy();
+  aiPolicy = new MonteCarloAI();
 }
 
 void draw() {
@@ -100,17 +96,7 @@ void keyPressed() {
 void maybeAiShoot() {
   if (game.state != GameState.AIMING || game.currentTeam != TEAM_YELLOW) return;
 
-  int lastTeam = TEAM_RED;
-  if (game.stones.size() > 0) {
-    lastTeam = game.stones.get(game.stones.size() - 1).team;
-  }
-
-  float[] state = aiPolicy.convertState(
-    game.stones,
-    game.stonesRemaining(TEAM_YELLOW),
-    lastTeam
-  );
-  game.fire(aiPolicy.predict(state));
+  game.fire(aiPolicy.chooseBestShot(game.stones));
 }
 
 // ----- Aim preview: forward-simulated trajectory in team color

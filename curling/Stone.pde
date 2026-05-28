@@ -36,6 +36,15 @@ class Stone {
     this.hogPassed = false;
   }
 
+  Stone copy() {
+    Stone c = new Stone(pos.x, pos.y, team);
+    c.vel       = vel.copy();
+    c.curl      = curl;
+    c.spinAngle = spinAngle;
+    c.hogPassed = hogPassed;
+    return c;
+  }
+
   boolean isMoving() {
     return vel.magSq() > 0.0001;
   }

@@ -482,6 +482,9 @@ class UI {
   }
 
   void setRndStones(){
+    if (game.state == GameState.ENDED){
+      game.reset();
+    }
     RandomState rs = new RandomState();
     rs.randomize(game.stones, STONES_PER_TEAM);
     game.stonesThrown = TOTAL_STONES - 1;

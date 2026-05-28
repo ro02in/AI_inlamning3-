@@ -1,28 +1,103 @@
 class NeuralPolicy {
     int inputSize = TOTAL_STONES * 4 + 2;
-    int hiddenSize = 12;
+    int hiddenSize = 24;
     int outputSize = 3;
 
     NeuronLayer hiddenLayer;
     NeuronLayer outputLayer;
 
+    float[] lastHidden;
+    float[] lastOutput;
+
     NeuralPolicy() {
-        hiddenLayer = new NeuronLayer(hiddenSize, inputSize, false);
-        outputLayer = new NeuronLayer(outputSize, hiddenSize, false); // tanh on both layers; output capped in predict
+        hiddenLayer = new NeuronLayer(hiddenSize, inputSize, ActivationType.RELU);
+        outputLayer = new NeuronLayer(outputSize, hiddenSize, ActivationType.LINEAR);
+        initOutputWeights();
+    }
+
+    void initOutputWeights() {
+        for (Neuron n : outputLayer.neurons) {
+            for (int i = 0; i < n.weights.length; i++) {
+                n.weights[i] *= 2.0f;
+            }
+        }
+    }
+
+    void forward(float[] state) {
+        lastHidden = hiddenLayer.forward(state);
+        lastOutput = outputLayer.forward(lastHidden);
+    }
+
+    Shot predictFromCache() {
+        float minSpeed = minSpeed();
+        float speedRange = UI.SPEED_MAX - minSpeed;
+
+        float curl  = constrain(lastOutput[0], -1, 1);
+        float speedNorm = constrain(lastOutput[1], -1, 1);
+        float speed = minSpeed + ((speedNorm + 1) / 2.0) * speedRange;
+        float angle = constrain(lastOutput[2], -1, 1) * PI / 18;
+        return new Shot(curl, speed, angle);
     }
 
     Shot predict(float[] state) {
-        float[] hiddenOutputs = hiddenLayer.feedForward(state);
-        float[] outputValues = outputLayer.feedForward(hiddenOutputs);
+        forward(state);
+        return predictFromCache();
+    }
 
-        // All three outputs are tanh → [-1, 1].
-        // curl stays as-is; speed maps [-1,1] → [MIN,MAX]; angle maps to ±10°.
-        float MIN_SPEED = UI.SPEED_MAX * 0.2f;
+    void backwardFromShotGrad(float dCurl, float dSpeed, float dAngle) {
+        float minSpeed = minSpeed();
+        float speedRange = UI.SPEED_MAX - minSpeed;
 
-        float curl  = outputValues[0];
-        float speed = MIN_SPEED + ((outputValues[1] + 1) / 2.0) * (UI.SPEED_MAX - MIN_SPEED);
-        float angle = outputValues[2] * PI / 18;
-        return new Shot(curl, speed, angle);
+        float[] outputGrads = new float[outputSize];
+        outputGrads[0] = clipGrad(lastOutput[0], -1, 1, dCurl);
+        outputGrads[1] = clipGrad(lastOutput[1], -1, 1, dSpeed * speedRange / 2.0f);
+        outputGrads[2] = clipGrad(lastOutput[2], -1, 1, dAngle * (18.0f / PI));
+
+        float[] hiddenGrads = outputLayer.backward(outputGrads);
+        hiddenLayer.backward(hiddenGrads);
+    }
+
+    float clipGrad(float raw, float lo, float hi, float grad) {
+        if (raw <= lo && grad < 0) return 0;
+        if (raw >= hi && grad > 0) return 0;
+        return grad;
+    }
+
+    void zeroGrads() {
+        hiddenLayer.zeroGrads();
+        outputLayer.zeroGrads();
+    }
+
+    void applyGrads(float learningRate, float weightDecay) {
+        hiddenLayer.applyGrads(learningRate, weightDecay);
+        outputLayer.applyGrads(learningRate, weightDecay);
+    }
+
+    void applyGrads(float learningRate, float hiddenDecay, float outputDecay) {
+        hiddenLayer.applyGrads(learningRate, hiddenDecay, hiddenDecay);
+        outputLayer.applyGrads(learningRate, 0, outputDecay);
+    }
+
+    void scaleGrads(float factor) {
+        hiddenLayer.scaleGrads(factor);
+        outputLayer.scaleGrads(factor);
+    }
+
+    void clipGrads(float maxAbs) {
+        hiddenLayer.clipGrads(maxAbs);
+        outputLayer.clipGrads(maxAbs);
+    }
+
+    boolean hasFiniteGrads() {
+        return hiddenLayer.hasFiniteGrads() && outputLayer.hasFiniteGrads();
+    }
+
+    boolean hasFiniteWeights() {
+        return hiddenLayer.hasFiniteWeights() && outputLayer.hasFiniteWeights();
+    }
+
+    float minSpeed() {
+        return UI.SPEED_MAX * 0.2f;
     }
 
     void mutate(float mutationRate, float mutationStrength) {
@@ -35,7 +110,6 @@ class NeuralPolicy {
         outputLayer.clipAll();
     }
 
-    // Sum of all squared weights and biases. Used as L2 regularisation penalty.
     float weightL2() {
         float sum = 0;
         for (Neuron n : hiddenLayer.neurons) {
@@ -65,7 +139,7 @@ class NeuralPolicy {
                 state[i++] = (s.pos.x - sheet.centerX) / (sheet.SHEET_WIDTH_FT * 0.5);
                 state[i++] = (s.pos.y - sheet.hogY) / (sheet.backFarY - sheet.hogY);
                 state[i++] = s.team == TEAM_RED ? 1 : 0;
-                state[i++] = 1; // 1 = existing stone
+                state[i++] = 1;
             } else {
                 state[i++] = 0;
                 state[i++] = 0;

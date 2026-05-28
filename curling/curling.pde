@@ -45,6 +45,8 @@ boolean trainPenaltyEnabled = false;
 boolean trainPinEnabled     = true;
 boolean trainScoreEnabled   = false;
 PolicySearchTraining trainer;
+PolicyGradientTraining gradientTrainer;
+boolean useGradientTraining = true;
 NeuralPolicy aiPolicy;
 ScoreHeuristic scoreHeuristic;
 CloseToButtonHeuristic pinHeuristic;
@@ -86,12 +88,28 @@ void setup() {
   ui      = new UI();
   game    = new Game();
 
-  trainer       = new PolicySearchTraining();
+  trainer          = new PolicySearchTraining();
+  gradientTrainer  = new PolicyGradientTraining();
   scoreHeuristic   = new ScoreHeuristic();
   pinHeuristic     = new CloseToButtonHeuristic();
   penaltyHeuristic = new PenaltyHeuristic();
   trainingPreview  = new TrainingPreview();
-  aiPolicy         = trainer.current.copy();
+  aiPolicy         = trainingPolicy().copy();
+}
+
+NeuralPolicy trainingPolicy() {
+  return useGradientTraining ? gradientTrainer.policy : trainer.current;
+}
+
+String trainingMethodLabel() {
+  return useGradientTraining ? "REINFORCE" : "Evolution";
+}
+
+void toggleTrainingMethod() {
+  if (trainingActive) return;
+  useGradientTraining = !useGradientTraining;
+  aiPolicy = trainingPolicy().copy();
+  trainingStatus = trainingMethodLabel();
 }
 
 ArrayList<Heuristic> activeTrainingHeuristics() {
@@ -108,13 +126,18 @@ void draw() {
 
   if (appMode == AppMode.TRAINING) {
     if (trainingActive) {
-      trainer.comparePolicies(activeTrainingHeuristics());
+      if (useGradientTraining) {
+        gradientTrainer.trainStep(activeTrainingHeuristics());
+        gradientTrainer.decaySigmas(trainingDone);
+      } else {
+        trainer.comparePolicies(activeTrainingHeuristics());
+      }
       trainingDone++;
-      trainingPreview.recordSnapshot(trainingDone, trainer.current);
+      trainingPreview.recordSnapshot(trainingDone, trainingPolicy());
       if (trainingDone >= trainingTarget) {
         trainingActive = false;
         appMode = AppMode.PLAY;
-        aiPolicy = trainer.current.copy();
+        aiPolicy = trainingPolicy().copy();
         trainingStatus = "Klar! (" + trainingDone + " jamf.)";
         trainingPreview.reset();
       }
@@ -163,7 +186,7 @@ void cancelTraining() {
   if (!trainingActive) return;
   trainingActive = false;
   appMode        = AppMode.PLAY;
-  aiPolicy       = trainer.current.copy();
+  aiPolicy       = trainingPolicy().copy();
   trainingStatus = "Avbruten (" + trainingDone + " jamf.)";
   trainingPreview.reset();
 }
@@ -171,7 +194,8 @@ void cancelTraining() {
 void resetTrainingModel() {
   if (trainingActive) return;
   trainer.reset();
-  aiPolicy       = trainer.current.copy();
+  gradientTrainer.reset();
+  aiPolicy       = trainingPolicy().copy();
   trainingDone   = 0;
   trainingTarget = 0;
   trainingStatus = "Ny modell";
@@ -179,7 +203,7 @@ void resetTrainingModel() {
 
 void startAiTest() {
   appMode = AppMode.TEST;
-  aiPolicy = trainer.current.copy();
+  aiPolicy = trainingPolicy().copy();
   testGamesPlayed = 0;
   testHumanWins     = 0;
   testAiWins        = 0;
@@ -286,6 +310,10 @@ void keyPressed() {
     DEBUG = !DEBUG;
   } else if (key == 'r' || key == 'R') {
     game.reset();
+  } else if (key == 'b' || key == 'B') {
+    new ReinforceSmokeTest().run();
+  } else if (key == 'g' || key == 'G') {
+    toggleTrainingMethod();
   }
 }
 

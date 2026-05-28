@@ -512,14 +512,15 @@ class UI {
     textSize(9);
     if (appMode == AppMode.TRAINING) {
       text("Traning: " + trainingDone + " / " + trainingTarget
-           + "  (" + heuristicLabel() + ")", left, AI_STATUS_Y);
+           + "  (" + trainingMethodLabel() + ", " + heuristicLabel() + ")", left, AI_STATUS_Y);
     } else if (trainingStatus.length() > 0) {
-      text(trainingStatus + "  (" + heuristicLabel() + ")", left, AI_STATUS_Y);
+      text(trainingStatus + "  (" + trainingMethodLabel() + ", " + heuristicLabel() + ")", left, AI_STATUS_Y);
     } else if (appMode == AppMode.TEST) {
       text("Test: Rod " + testHumanWins + "  Gul " + testAiWins
            + "  (" + testGamesPlayed + " sim)", left, AI_STATUS_Y);
     } else {
-      text("Heuristik: " + heuristicLabel() + "  |  " + trainingDone + " jamf.", left, AI_STATUS_Y);
+      text(trainingMethodLabel() + "  |  " + heuristicLabel()
+           + "  |  " + trainingDone + " jamf.", left, AI_STATUS_Y);
     }
     popStyle();
   }

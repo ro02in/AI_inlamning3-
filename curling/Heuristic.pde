@@ -25,12 +25,10 @@ abstract class Heuristic {
         return weight * (raw / scale);
     }
 
-    // Run physics for one shot and return the result.
-    // Called once per policy per layout so all heuristics score the same positions.
-    ShotResult simulate(NeuralPolicy policy, float[] state, ArrayList<Stone> layout) {
+    // Run physics for a fixed shot on a layout (no policy lookup).
+    ShotResult simulateShot(Shot shot, ArrayList<Stone> layout) {
         ArrayList<Stone> simStones = copyLayout(layout);
         ScoreResult scoreBefore = house.scoreEnd(simStones);
-        Shot shot = policy.predict(state);
 
         PVector h = sheet.hackWorld();
         Stone fired = new Stone(h.x, h.y, TEAM_YELLOW);
@@ -46,6 +44,12 @@ abstract class Heuristic {
         }
 
         return new ShotResult(simStones, fired, scoreBefore, shot);
+    }
+
+    // Run physics for one shot and return the result.
+    // Called once per policy per layout so all heuristics score the same positions.
+    ShotResult simulate(NeuralPolicy policy, float[] state, ArrayList<Stone> layout) {
+        return simulateShot(policy.predict(state), layout);
     }
 
     // Score a pre-simulated result (no physics; cheap).

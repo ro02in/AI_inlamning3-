@@ -1,11 +1,14 @@
 // Activation function choice for a Neuron / NeuronLayer.
 // - TANH:   bounded [-1, 1], smooth, can saturate at the edges.
-// - RELU:   unbounded above, zero below. No upper saturation but can "die".
+// - RELU:   leaky ReLU (see RELU_LEAK). Small negative slope keeps units recoverable under mutation.
 // - LINEAR: identity. Used when an output should not be squashed.
 enum ActivationKind { TANH, RELU, LINEAR }
 
 class Neuron {
     static final float WEIGHT_CLIP = 1.0f;
+    static final float RELU_LEAK = 0.01f;
+    // Activations below this count as inactive in diagnostics / training penalty.
+    static final float RELU_INACTIVE_THRESHOLD = 0.05f;
 
     float[] weights;
     float bias;
@@ -30,7 +33,10 @@ class Neuron {
         for (int i = 0; i < inputCount; i++) {
             weights[i] = random(-1, 1) * scale;
         }
-        bias = random(-0.3, 0.3);
+        // ReLU: start slightly positive so most units fire on typical sparse state vectors.
+        bias = (activation == ActivationKind.RELU)
+             ? random(0.05f, 0.35f)
+             : random(-0.3f, 0.3f);
     }
 
     float activate(float[] inputs) {
@@ -40,7 +46,7 @@ class Neuron {
         }
         switch (activation) {
             case TANH:   return (float) Math.tanh(sum);
-            case RELU:   return max(0, sum);
+            case RELU:   return sum > 0 ? sum : RELU_LEAK * sum;
             case LINEAR: return sum;
             default:     return sum;
         }

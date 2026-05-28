@@ -259,10 +259,13 @@ class UI {
   Button     penaltyHeuristicBtn;
   Button     pinHeuristicBtn;
   Button     scoreHeuristicBtn;
+  Button     noiseHeuristicBtn;
   Button     simShotsMinusBtn;
   Button     simShotsPlusBtn;
   Button     expertShotsMinusBtn;
   Button     expertShotsPlusBtn;
+  Button     noiseMinusBtn;
+  Button     noisePlusBtn;
   Slider     activeSlider;
 
   int        trainComparisons = 100;
@@ -273,9 +276,9 @@ class UI {
   final int  TRAIN_MAX = 1000000;
   final float TRAIN_BAR_Y = 114;
   final float TRAIN_BAR_H = 10;
-  final float HEURISTIC_BTN_Y = 146;
+  final float HEURISTIC_BTN_Y = 158;
   final float HEURISTIC_BTN_H = 18;
-  final float AI_STATUS_Y = 168;
+  final float AI_STATUS_Y = 180;
 
   // Lock workflow phase. 0 = locking angle, 1 = locking speed.
   final int PHASE_ANGLE = 0;
@@ -377,19 +380,22 @@ class UI {
                                expertThirdW, 40);
 
     float hx = ICE_W + 20;
-    float hgap = 4;
-    float hw = (SIDEBAR_W - 40 - hgap * 2) / 3.0f;
-    penaltyHeuristicBtn = new Button("Straff", hx,                    HEURISTIC_BTN_Y, hw, HEURISTIC_BTN_H);
-    pinHeuristicBtn     = new Button("Pin",    hx + hw + hgap,         HEURISTIC_BTN_Y, hw, HEURISTIC_BTN_H);
-    scoreHeuristicBtn   = new Button("Score",  hx + (hw + hgap) * 2,   HEURISTIC_BTN_Y, hw, HEURISTIC_BTN_H);
+    float hgap = 3;
+    float hw = (SIDEBAR_W - 40 - hgap * 3) / 4.0f;
+    penaltyHeuristicBtn = new Button("Straff", hx,                         HEURISTIC_BTN_Y, hw, HEURISTIC_BTN_H);
+    pinHeuristicBtn     = new Button("Pin",    hx + (hw + hgap),          HEURISTIC_BTN_Y, hw, HEURISTIC_BTN_H);
+    scoreHeuristicBtn   = new Button("Score",  hx + (hw + hgap) * 2,      HEURISTIC_BTN_Y, hw, HEURISTIC_BTN_H);
+    noiseHeuristicBtn   = new Button("Brus",   hx + (hw + hgap) * 3,      HEURISTIC_BTN_Y, hw, HEURISTIC_BTN_H);
 
     float smallW = 18;
     float smallH = 14;
     float smallRight = ICE_W + SIDEBAR_W - 16;
     simShotsMinusBtn    = new Button("-", smallRight - smallW * 2 - 4, 126, smallW, smallH);
     simShotsPlusBtn     = new Button("+", smallRight - smallW,          126, smallW, smallH);
-    expertShotsMinusBtn = new Button("-", smallRight - smallW * 2 - 4, 142, smallW, smallH);
-    expertShotsPlusBtn  = new Button("+", smallRight - smallW,          142, smallW, smallH);
+    expertShotsMinusBtn = new Button("-", smallRight - smallW * 2 - 4, 140, smallW, smallH);
+    expertShotsPlusBtn  = new Button("+", smallRight - smallW,          140, smallW, smallH);
+    noiseMinusBtn       = new Button("-", smallRight - smallW * 2 - 4, 154, smallW, smallH);
+    noisePlusBtn        = new Button("+", smallRight - smallW,          154, smallW, smallH);
     lockPhase = PHASE_ANGLE;
   }
 
@@ -547,6 +553,7 @@ class UI {
     drawHeuristicButton(penaltyHeuristicBtn, trainPenaltyEnabled, canPick);
     drawHeuristicButton(pinHeuristicBtn, trainPinEnabled, canPick);
     drawHeuristicButton(scoreHeuristicBtn, trainScoreEnabled, canPick);
+    drawHeuristicButton(noiseHeuristicBtn, ensemble.trainers[0].explorationNoise.enabled, canPick);
   }
 
   void drawHeuristicButton(Button btn, boolean selected, boolean enabled) {
@@ -596,17 +603,24 @@ class UI {
     textAlign(LEFT, TOP);
     textSize(9);
     text("Shots/pred: " + shotsPerPrediction, left, 124);
-    text("Expert/pred: " + expertShotsPerPrediction, left, 140);
+    text("Expert/pred: " + expertShotsPerPrediction, left, 138);
+    String brusLabel = ensemble.trainers[0].explorationNoise.enabled ? "på" : "av";
+    text("Brus " + brusLabel + " x" + nf(ensemble.trainers[0].explorationNoise.strength, 0, 1),
+         left, 152);
 
     boolean canTuneCounts = appMode != AppMode.RECORD;
     simShotsMinusBtn.enabled = canTuneCounts;
     simShotsPlusBtn.enabled = canTuneCounts;
     expertShotsMinusBtn.enabled = canTuneCounts;
     expertShotsPlusBtn.enabled = canTuneCounts;
+    noiseMinusBtn.enabled = canTuneCounts;
+    noisePlusBtn.enabled = canTuneCounts;
     simShotsMinusBtn.draw();
     simShotsPlusBtn.draw();
     expertShotsMinusBtn.draw();
     expertShotsPlusBtn.draw();
+    noiseMinusBtn.draw();
+    noisePlusBtn.draw();
 
     fill(200);
     textAlign(LEFT, TOP);
@@ -671,6 +685,17 @@ class UI {
 
   void adjustExpertShotsPerPrediction(int delta) {
     expertShotsPerPrediction = constrain(expertShotsPerPrediction + delta, 0, 500);
+  }
+
+  void toggleExplorationNoise() {
+    for (int i = 0; i < ensemble.count; i++)
+      ensemble.trainers[i].explorationNoise.enabled = !ensemble.trainers[i].explorationNoise.enabled;
+  }
+
+  void adjustExplorationNoiseStrength(float delta) {
+    for (int i = 0; i < ensemble.count; i++)
+      ensemble.trainers[i].explorationNoise.strength = constrain(
+        ensemble.trainers[i].explorationNoise.strength + delta, 0.25f, 2.0f);
   }
 
   float trainBarX() { return ICE_W + 16; }
@@ -862,6 +887,14 @@ class UI {
       adjustExpertShotsPerPrediction(1);
       return;
     }
+    if (noiseMinusBtn.enabled && noiseMinusBtn.hits(mx, my)) {
+      adjustExplorationNoiseStrength(-0.1f);
+      return;
+    }
+    if (noisePlusBtn.enabled && noisePlusBtn.hits(mx, my)) {
+      adjustExplorationNoiseStrength(0.1f);
+      return;
+    }
 
     if (trainBtn.enabled && trainBtn.hits(mx, my)) {
       if (trainingActive) cancelTraining();
@@ -884,6 +917,10 @@ class UI {
       }
       if (scoreHeuristicBtn.hits(mx, my)) {
         toggleScoreHeuristic();
+        return;
+      }
+      if (noiseHeuristicBtn.hits(mx, my)) {
+        toggleExplorationNoise();
         return;
       }
     }
@@ -951,6 +988,9 @@ class UI {
     simShotsPlusBtn.hover = simShotsPlusBtn.hits(mx, my);
     expertShotsMinusBtn.hover = expertShotsMinusBtn.hits(mx, my);
     expertShotsPlusBtn.hover = expertShotsPlusBtn.hits(mx, my);
+    noiseMinusBtn.hover = noiseMinusBtn.hits(mx, my);
+    noisePlusBtn.hover = noisePlusBtn.hits(mx, my);
+    noiseHeuristicBtn.hover = noiseHeuristicBtn.hits(mx, my);
     penaltyHeuristicBtn.hover = penaltyHeuristicBtn.hits(mx, my);
     pinHeuristicBtn.hover = pinHeuristicBtn.hits(mx, my);
     scoreHeuristicBtn.hover = scoreHeuristicBtn.hits(mx, my);

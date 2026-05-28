@@ -18,7 +18,8 @@ class PolicyDiagnostics {
     logShot(outputs, shot);
     logLayerStats("hidden", policy.hiddenLayer);
     logLayerStats("output", policy.outputLayer);
-    logSaturation(hidden, "hidden");
+    logHiddenHealth(hidden, "hidden", policy.HIDDEN_ACTIVATION);
+    logOutputHealth(outputs, policy.OUTPUT_ACTIVATION);
     println("=========================================");
   }
 
@@ -100,15 +101,55 @@ class PolicyDiagnostics {
             + "  bMean=" + nf(bSum / layer.neurons.length, 0, 4));
   }
 
-  void logSaturation(float[] activations, String name) {
+  // Returns [saturationPct, inactivePct] for a hidden activation vector.
+  float[] hiddenHealthPcts(float[] activations, ActivationKind hiddenActivation) {
     int saturated = 0;
+    int inactive = 0;
+    boolean countInactive = (hiddenActivation == ActivationKind.RELU);
     for (float v : activations) {
-      if (abs(v) > 0.9) saturated++;
+      if (abs(v) > 0.9f) saturated++;
+      if (countInactive && v < Neuron.RELU_INACTIVE_THRESHOLD) inactive++;
     }
-    float pct = 100.0f * saturated / activations.length;
-    println("-- " + name + " saturation (|a|>0.9): "
-            + saturated + "/" + activations.length
-            + " (" + nf(pct, 0, 1) + "%)");
+    float n = activations.length;
+    return new float[]{
+      100.0f * saturated / n,
+      100.0f * inactive / n
+    };
+  }
+
+  void logHiddenHealth(float[] activations, String name, ActivationKind hiddenActivation) {
+    float[] pcts = hiddenHealthPcts(activations, hiddenActivation);
+    float sq = 0;
+    for (float v : activations) sq += v * v;
+    float rms = sqrt(sq / activations.length);
+    println("-- " + name + " health --");
+    println("  sat (|a|>0.9): " + nf(pcts[0], 0, 1) + "%"
+            + "  rms=" + nf(rms, 0, 3));
+    if (hiddenActivation == ActivationKind.RELU) {
+      println("  inactive (a<" + nf(Neuron.RELU_INACTIVE_THRESHOLD, 0, 2) + "): "
+              + nf(pcts[1], 0, 1) + "%");
+    } else {
+      println("  inactive: n/a (hidden is not ReLU)");
+    }
+  }
+
+  // Fraction of output units with |tanh-out| > 0.9. Returns percent.
+  float outputSaturationPct(float[] outputs, ActivationKind outputActivation) {
+    if (outputActivation != ActivationKind.TANH) return 0;
+    int saturated = 0;
+    for (float v : outputs) {
+      if (abs(v) > 0.9f) saturated++;
+    }
+    return 100.0f * saturated / outputs.length;
+  }
+
+  void logOutputHealth(float[] outputs, ActivationKind outputActivation) {
+    println("-- output health --");
+    if (outputActivation == ActivationKind.TANH) {
+      println("  sat (|out|>0.9): " + nf(outputSaturationPct(outputs, outputActivation), 0, 1) + "%");
+    } else {
+      println("  sat: n/a (output is not tanh)");
+    }
   }
 
   String arraySummary(float[] values) {

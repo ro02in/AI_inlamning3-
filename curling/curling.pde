@@ -44,8 +44,7 @@ AppMode appMode = AppMode.PLAY;
 boolean trainPenaltyEnabled = false;
 boolean trainPinEnabled     = true;
 boolean trainScoreEnabled   = false;
-PolicySearchTraining trainer;
-NeuralPolicy aiPolicy;
+ExpertEnsemble ensemble;
 ScoreHeuristic scoreHeuristic;
 CloseToButtonHeuristic pinHeuristic;
 PenaltyHeuristic penaltyHeuristic;
@@ -91,21 +90,20 @@ void setup() {
   ui      = new UI();
   game    = new Game();
 
-  trainer       = new PolicySearchTraining();
+  ensemble         = new ExpertEnsemble();
   scoreHeuristic   = new ScoreHeuristic();
   pinHeuristic     = new CloseToButtonHeuristic();
   penaltyHeuristic = new PenaltyHeuristic();
   expertHeuristic  = new ExpertShotHeuristic();
   trainingPreview  = new TrainingPreview();
-  aiPolicy         = trainer.current.copy();
   expertShots      = new ExpertShotDataset();
 }
 
 void applyRecordPolicySliders() {
   if (recordSession == null) return;
-  float[] state = aiPolicy.convertState(
-    recordSession.layoutSnapshot, 1, TEAM_RED);
-  ui.setSlidersFromShot(aiPolicy.predict(state));
+  NeuralPolicy p = ensemble.anyPolicy();
+  float[] state = p.convertState(recordSession.layoutSnapshot, 1, TEAM_RED);
+  ui.setSlidersFromShot(p.predict(state));
 }
 
 void recordNextShot() {
@@ -152,7 +150,7 @@ void draw() {
 
   if (appMode == AppMode.TRAINING) {
     if (trainingActive) {
-      trainer.comparePolicies(
+      ensemble.trainAll(
         activeTrainingHeuristics(),
         ui.shotsPerPrediction,
         expertHeuristic,
@@ -160,11 +158,10 @@ void draw() {
         expertShots
       );
       trainingDone++;
-      trainingPreview.recordSnapshot(trainingDone, trainer.current);
+      trainingPreview.recordSnapshot(trainingDone, ensemble.anyPolicy());
       if (trainingDone >= trainingTarget) {
         trainingActive = false;
         appMode = AppMode.PLAY;
-        aiPolicy = trainer.current.copy();
         trainingStatus = "Klar! (" + trainingDone + " jamf.)";
         trainingPreview.reset();
       }
@@ -223,15 +220,13 @@ void cancelTraining() {
   if (!trainingActive) return;
   trainingActive = false;
   appMode        = AppMode.PLAY;
-  aiPolicy       = trainer.current.copy();
   trainingStatus = "Avbruten (" + trainingDone + " jamf.)";
   trainingPreview.reset();
 }
 
 void resetTrainingModel() {
   if (trainingActive) return;
-  trainer.reset();
-  aiPolicy       = trainer.current.copy();
+  ensemble.reset();
   trainingDone   = 0;
   trainingTarget = 0;
   trainingStatus = "Ny modell";
@@ -239,7 +234,6 @@ void resetTrainingModel() {
 
 void startAiTest() {
   appMode = AppMode.TEST;
-  aiPolicy = trainer.current.copy();
   testGamesPlayed = 0;
   testHumanWins     = 0;
   testAiWins        = 0;
@@ -259,9 +253,11 @@ void stopAiTest() {
 void runAiTestSim() {
   aiTestStones = new ArrayList<Stone>();
   aiTestRandom.randomize(aiTestStones, STONES_PER_TEAM);
-  float[] state = aiPolicy.convertState(aiTestStones, 1, TEAM_RED);
-  aiTestLastShot = aiPolicy.predict(state);
-  new PolicyDiagnostics().logTestShot(aiPolicy, aiTestStones, 1, TEAM_RED);
+
+  Heuristic scorer = activeTrainingHeuristics().isEmpty()
+                   ? pinHeuristic
+                   : activeTrainingHeuristics().get(0);
+  aiTestLastShot = ensemble.bestShot(aiTestStones, 1, TEAM_RED, scorer, true);
 
   PVector h = sheet.hackWorld();
   Stone fired = new Stone(h.x, h.y, TEAM_YELLOW);
@@ -426,12 +422,12 @@ void maybeAiShoot() {
     lastTeam = game.stones.get(game.stones.size() - 1).team;
   }
 
-  float[] state = aiPolicy.convertState(
-    game.stones,
-    game.stonesRemaining(TEAM_YELLOW),
-    lastTeam
-  );
-  game.fire(aiPolicy.predict(state));
+  Heuristic scorer = activeTrainingHeuristics().isEmpty()
+                   ? pinHeuristic
+                   : activeTrainingHeuristics().get(0);
+  Shot shot = ensemble.bestShot(game.stones, game.stonesRemaining(TEAM_YELLOW),
+                                lastTeam, scorer, false);
+  game.fire(shot);
 }
 
 // ----- Aim preview: forward-simulated trajectory in team color

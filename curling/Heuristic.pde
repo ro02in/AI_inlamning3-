@@ -27,9 +27,15 @@ abstract class Heuristic {
     // Run physics for one shot and return the result.
     // Called once per policy per layout so all heuristics score the same positions.
     ShotResult simulate(NeuralPolicy policy, float[] state, ArrayList<Stone> layout) {
+        return simulate(policy, state, layout, null);
+    }
+
+    ShotResult simulate(NeuralPolicy policy, float[] state, ArrayList<Stone> layout,
+                        ExplorationNoise noise) {
         ArrayList<Stone> simStones = copyLayout(layout);
         ScoreResult scoreBefore = house.scoreEnd(simStones);
         Shot shot = policy.predict(state);
+        if (noise != null) shot = noise.perturb(shot, policy);
 
         PVector h = sheet.hackWorld();
         Stone fired = new Stone(h.x, h.y, TEAM_YELLOW);
@@ -115,6 +121,8 @@ class PenaltyHeuristic extends Heuristic {
 // Matches a predicted shot directly against an expert target shot (no physics simulation).
 class ExpertShotHeuristic extends Heuristic {
     Shot targetShot;
+    // Default NeuralPolicy angle caps are ±10° (20° total span).
+    final float defaultAngleSpanRad = radians(20f);
 
     ExpertShotHeuristic() {
         this.weight = 5.0;
@@ -130,8 +138,8 @@ class ExpertShotHeuristic extends Heuristic {
         if (targetShot == null || predicted == null) return 0;
         float curlErr  = abs(predicted.curl - targetShot.curl);
         float speedErr = abs(predicted.speed - targetShot.speed) / UI.SPEED_MAX;
-        // Normalize against +/- 10 degrees used by NeuralPolicy output mapping.
-        float angleErr = abs(predicted.angle - targetShot.angle) / (PI / 18.0);
+        float angleErr = abs(predicted.angle - targetShot.angle)
+                        / defaultAngleSpanRad;
         return -(curlErr + speedErr + angleErr);
     }
 

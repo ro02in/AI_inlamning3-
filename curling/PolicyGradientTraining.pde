@@ -46,9 +46,9 @@ class PolicyGradientTraining {
     void reset() {
         if (policy != null) {
             policy = new NeuralPolicy(policy.minCurl, policy.maxCurl,
-                                      policy.minSpeed, policy.maxSpeed,
-                                      policy.minAngleDeg, policy.maxAngleDeg,
-                                      policy.meanAndStd);
+                                    policy.minSpeed, policy.maxSpeed,
+                                    policy.minAngleDeg, policy.maxAngleDeg,
+                                    policy.meanAndStd);
         } else {
             policy = new NeuralPolicy(true);
         }

@@ -214,10 +214,6 @@ class UI {
   Button     resetGameBtn;
   Button     startPlayerBtn;
   Button     rndStateBtn;
-  Button     datasetBtn;
-  Button     expertNextBtn;
-  Button     expertNewBtn;
-  Button     expertExitBtn;
   Button     trainBtn;
   Button     testBtn;
   Button     resetModelBtn;
@@ -247,8 +243,6 @@ class UI {
   final float BTN_TOP      = 736;
   final float TRAIN_BTN_TOP    = 794;
   final float EXTRA_BTN_TOP    = 840;
-  final float DATASET_BTN_TOP  = 882;
-  final float EXPERT_BTN_TOP   = TRAIN_BTN_TOP;
 
   final float LOCK_BASE_HZ            = 0.7;
   final float LOCK_CURL_HZ_MULT       = 1.1;
@@ -303,14 +297,6 @@ class UI {
                                EXTRA_BTN_TOP,
                                quarterW, 36);
 
-    datasetBtn = new Button("Expert dataset", halfX, DATASET_BTN_TOP, btnW, 36);
-
-    float expertGap    = 6;
-    float expertThirdW = (btnW - expertGap * 2) / 3.0f;
-    expertNextBtn = new Button("N\u00e4sta", halfX,                                  EXPERT_BTN_TOP, expertThirdW, 40);
-    expertNewBtn  = new Button("Ny state",  halfX + expertThirdW + expertGap,        EXPERT_BTN_TOP, expertThirdW, 40);
-    expertExitBtn = new Button("Avsluta",   halfX + (expertThirdW + expertGap) * 2,  EXPERT_BTN_TOP, expertThirdW, 40);
-
     lockPhase = PHASE_ANGLE;
   }
 
@@ -332,19 +318,6 @@ class UI {
     speedBar.reset();
     lockPhase = PHASE_ANGLE;
   }
-
-  void onRecordEnter() { onTurnStart(); }
-  void onRecordExit()  { onTurnStart(); }
-
-  void setSlidersFromShot(Shot shot) {
-    curlSlider.value  = constrain(shot.curl, curlSlider.minV, curlSlider.maxV);
-    speedSlider.value = constrain(shot.speed / SPEED_MAX,
-                                  speedSlider.minV, speedSlider.maxV);
-    angleSlider.value = constrain(degrees(shot.angle),
-                                  angleSlider.minV, angleSlider.maxV);
-  }
-
-  boolean recordMode() { return appMode == AppMode.RECORD; }
 
   final static float SPEED_MAX = 40.0;
 
@@ -370,23 +343,19 @@ class UI {
     drawAiPanel();
 
     boolean controlsEnabled = appMode != AppMode.TRAINING;
-    boolean showLockBars    = controlsEnabled && !recordMode();
+    boolean showLockBars    = controlsEnabled;
     curlSlider.draw();
     speedSlider.draw();
     angleSlider.draw();
 
     if (showLockBars) activeBar().draw();
 
-    if (recordMode()) drawRecordPanel();
-
-    if (!recordMode()) {
-      resetGameBtn.label = "Ny match";
-      resetGameBtn.enabled = appMode != AppMode.RECORD;
-      resetGameBtn.draw();
-      startPlayerBtn.label = game.startingTeam == TEAM_RED ? "Start: Rod" : "Start: Gul";
-      startPlayerBtn.enabled = appMode != AppMode.RECORD;
-      startPlayerBtn.draw();
-    }
+    resetGameBtn.label = "Ny match";
+    resetGameBtn.enabled = true;
+    resetGameBtn.draw();
+    startPlayerBtn.label = game.startingTeam == TEAM_RED ? "Start: Rod" : "Start: Gul";
+    startPlayerBtn.enabled = true;
+    startPlayerBtn.draw();
 
     if (appMode == AppMode.TEST) {
       shootBtn.label   = aiTestSimulating ? "..." : "Nasta test";
@@ -394,10 +363,6 @@ class UI {
     } else if (game.state == GameState.ENDED) {
       shootBtn.label   = "Ny match";
       shootBtn.enabled = controlsEnabled;
-    } else if (recordMode()) {
-      shootBtn.label   = "Skjut";
-      shootBtn.enabled = controlsEnabled
-                      && recordSession != null && recordSession.canShoot();
     } else if (game.state == GameState.AIMING) {
       shootBtn.label   = (lockPhase == PHASE_ANGLE) ? "L\u00e5s vinkel" : "L\u00e5s fart";
       shootBtn.enabled = controlsEnabled && game.currentTeam == TEAM_RED;
@@ -406,23 +371,6 @@ class UI {
       shootBtn.enabled = false;
     }
     shootBtn.draw();
-
-    if (recordMode()) {
-      boolean recReady = controlsEnabled && recordSession != null
-                      && recordSession.canSave();
-      expertNextBtn.enabled = recReady;
-      expertNewBtn.enabled  = recReady;
-      expertExitBtn.enabled = controlsEnabled;
-      expertNextBtn.draw();
-      expertNewBtn.draw();
-      expertExitBtn.draw();
-      return;
-    }
-
-    datasetBtn.label   = "Expert dataset";
-    datasetBtn.enabled = controlsEnabled && appMode != AppMode.TRAINING
-                      && appMode != AppMode.TEST;
-    datasetBtn.draw();
 
     trainBtn.label   = trainingActive ? "Avbryt" : "Trana";
     trainBtn.enabled = appMode != AppMode.TEST
@@ -496,9 +444,6 @@ class UI {
     } else if (appMode == AppMode.TEST) {
       text("Test: Rod " + testHumanWins + "  Gul " + testAiWins
            + "  (" + testGamesPlayed + " sim)", left, AI_STATUS_Y + 14);
-    } else if (appMode == AppMode.RECORD) {
-      int n = expertShots != null ? expertShots.count() : 0;
-      text("Dataset: " + n + " rader", left, AI_STATUS_Y + 14);
     } else {
       text(trainingDone + " steg klara", left, AI_STATUS_Y + 14);
     }
@@ -541,7 +486,7 @@ class UI {
     textAlign(LEFT, TOP);
     fill(235);
     textSize(15);
-    text(recordMode() ? "Expert-skott" : "Skott", left, STATS_TOP);
+    text("Skott", left, STATS_TOP);
 
     fill(170);
     textSize(11);
@@ -549,18 +494,10 @@ class UI {
     text("Status", left, STATS_TOP + 44);
 
     textAlign(RIGHT, TOP);
-    if (recordMode()) {
-      fill(color(230, 210, 80));
-      text("GUL", right, STATS_TOP + 26);
-      fill(220);
-      text(recordSession != null && recordSession.simulating
-           ? "SIMULERAR" : "AIMING", right, STATS_TOP + 44);
-    } else {
-      fill(game.currentTeam == TEAM_RED ? color(230, 80, 80) : color(230, 210, 80));
-      text(game.teamLabel(game.currentTeam), right, STATS_TOP + 26);
-      fill(220);
-      text(game.stateLabel(), right, STATS_TOP + 44);
-    }
+    fill(game.currentTeam == TEAM_RED ? color(230, 80, 80) : color(230, 210, 80));
+    text(game.teamLabel(game.currentTeam), right, STATS_TOP + 26);
+    fill(220);
+    text(game.stateLabel(), right, STATS_TOP + 44);
 
     drawTeamRow(left, STATS_TOP + 64, TEAM_RED);
     drawTeamRow(left, STATS_TOP + 82, TEAM_YELLOW);
@@ -573,9 +510,7 @@ class UI {
 
   void drawTeamRow(float xLeft, float y, int team) {
     color teamColor = team == TEAM_RED ? color(230, 80, 80) : color(230, 210, 80);
-    int   remaining = recordMode()
-      ? (team == TEAM_YELLOW ? 1 : 0)
-      : game.stonesRemaining(team);
+    int   remaining = game.stonesRemaining(team);
 
     pushStyle();
     textAlign(LEFT, CENTER);
@@ -602,25 +537,8 @@ class UI {
     popStyle();
   }
 
-  void drawRecordPanel() {
-    float left = ICE_W + 16;
-    pushStyle();
-    textAlign(LEFT, TOP);
-    fill(200);
-    textSize(10);
-    text("Dra stenar pa isen for att andra layout", left, BAR_Y - 28);
-    text("Nasta / Ny state = ny layout + AI-forslag", left, BAR_Y - 16);
-    popStyle();
-  }
-
   void triggerAction() {
     if (appMode == AppMode.TRAINING) return;
-    if (recordMode()) {
-      if (recordSession != null && recordSession.canShoot()) {
-        recordSession.shoot(intendedShot());
-      }
-      return;
-    }
     if (appMode == AppMode.TEST) {
       if (!aiTestSimulating) runAiTestSim();
       return;
@@ -645,7 +563,6 @@ class UI {
       trainingPreview.reset();
     }
     if (appMode == AppMode.TEST) stopAiTest();
-    if (appMode == AppMode.RECORD) stopRecordMode();
     appMode = AppMode.PLAY;
     game.reset();
   }
@@ -656,7 +573,6 @@ class UI {
       trainingPreview.reset();
     }
     if (appMode == AppMode.TEST) stopAiTest();
-    if (appMode == AppMode.RECORD) stopRecordMode();
     appMode = AppMode.PLAY;
     game.toggleStartingTeam();
   }
@@ -669,19 +585,6 @@ class UI {
   }
 
   void onMousePressed(float mx, float my) {
-    if (recordMode()) {
-      if (expertExitBtn.enabled && expertExitBtn.hits(mx, my)) { stopRecordMode(); return; }
-      if (expertNextBtn.enabled && expertNextBtn.hits(mx, my)) { recordNextShot(); return; }
-      if (expertNewBtn.enabled  && expertNewBtn.hits(mx, my))  { recordNewState(); return; }
-      if (shootBtn.enabled      && shootBtn.hits(mx, my))      { triggerAction();  return; }
-      activeSlider = null;
-      if      (curlSlider .trackHit(mx, my)) activeSlider = curlSlider;
-      else if (speedSlider.trackHit(mx, my)) activeSlider = speedSlider;
-      else if (angleSlider.trackHit(mx, my)) activeSlider = angleSlider;
-      if (activeSlider != null) { activeSlider.dragging = true; activeSlider.setFromMouseY(my); }
-      return;
-    }
-
     if (resetGameBtn.enabled && resetGameBtn.hits(mx, my)) { resetGameNow(); return; }
     if (startPlayerBtn.enabled && startPlayerBtn.hits(mx, my)) { toggleStartingPlayer(); return; }
 
@@ -695,15 +598,13 @@ class UI {
     if (testBtn.enabled && testBtn.hits(mx, my)) {
       if (appMode == AppMode.TEST) stopAiTest(); else startAiTest(); return;
     }
-    if (trainBarHit(mx, my) && appMode != AppMode.TRAINING && appMode != AppMode.RECORD) {
+    if (trainBarHit(mx, my) && appMode != AppMode.TRAINING) {
       draggingTrainBar = true;
       setTrainComparisonsFromMouse(mx);
       return;
     }
     if (shootBtn.enabled && shootBtn.hits(mx, my)) { triggerAction(); return; }
     if (rndStateBtn.enabled && rndStateBtn.hits(mx, my)) { setRndStones(); return; }
-    if (datasetBtn.enabled  && datasetBtn.hits(mx, my))  { startRecordMode(); return; }
-
     activeSlider = null;
     if (appMode == AppMode.TRAINING || appMode == AppMode.TEST) return;
     if      (curlSlider .trackHit(mx, my)) activeSlider = curlSlider;
@@ -732,10 +633,6 @@ class UI {
     resetModelBtn.hover = resetModelBtn.hits(mx, my);
     saveModelBtn.hover  = saveModelBtn.hits(mx, my);
     loadModelBtn.hover  = loadModelBtn.hits(mx, my);
-    datasetBtn.hover    = datasetBtn.hits(mx, my);
     rndStateBtn.hover   = rndStateBtn.hits(mx, my);
-    expertNextBtn.hover = expertNextBtn.hits(mx, my);
-    expertNewBtn.hover  = expertNewBtn.hits(mx, my);
-    expertExitBtn.hover = expertExitBtn.hits(mx, my);
   }
 }

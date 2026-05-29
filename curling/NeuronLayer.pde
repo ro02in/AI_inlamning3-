@@ -181,27 +181,10 @@ class NeuronLayer {
         return gradInput;
     }
 
-    void mutate(float mutationRate, float mutationStrength) {
-        for (Neuron neuron : neurons) {
-            neuron.mutate(mutationRate, mutationStrength);
-        }
-    }
-
     void clipAll() {
         for (Neuron neuron : neurons) {
             neuron.clip();
         }
-    }
-
-    NeuronLayer copy() {
-        NeuronLayer clone = new NeuronLayer(neurons.length,
-                                            neurons[0].weights.length,
-                                            neurons[0].activation,
-                                            normKind);
-        for (int i = 0; i < neurons.length; i++) {
-            clone.neurons[i] = neurons[i].copy();
-        }
-        return clone;
     }
 
     String activationName(ActivationKind kind) {

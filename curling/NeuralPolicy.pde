@@ -284,93 +284,12 @@ class NeuralPolicy {
         hiddenLayer.backward(gradHidden, lr);
     }
 
-    // ---- Diagnostics (used by ExpertEnsemble) ----
-
-    float hiddenInactiveFrac(float[] state) {
-        if (HIDDEN_ACTIVATION != ActivationKind.RELU) return 0;
-        float[] hidden = hiddenLayer.feedForward(state);
-        int inactive = 0;
-        for (float v : hidden) {
-            if (v < Neuron.RELU_INACTIVE_THRESHOLD) inactive++;
-        }
-        return inactive / (float) hidden.length;
-    }
-
-    float[] hiddenStats(float[] state) {
-        float[] hidden = hiddenLayer.feedForward(state);
-        int inactive = 0;
-        float sq = 0;
-        boolean isRelu = (HIDDEN_ACTIVATION == ActivationKind.RELU);
-        for (float v : hidden) {
-            if (isRelu && v < Neuron.RELU_INACTIVE_THRESHOLD) inactive++;
-            sq += v * v;
-        }
-        int n = hidden.length;
-        return new float[]{
-            isRelu ? (inactive / (float) n) : 0,
-            sq / n
-        };
-    }
-
-    float outputSaturationFrac(float[] state) {
-        if (OUTPUT_ACTIVATION != ActivationKind.TANH) return 0;
-        float[] hidden = hiddenLayer.feedForward(state);
-        float[] out = outputLayer.feedForward(hidden);
-        int saturated = 0;
-        for (float v : out) {
-            if (abs(v) > 0.9f) saturated++;
-        }
-        return saturated / (float) out.length;
-    }
-
-    // ---- Policy search helpers ----
-
-    void mutate(float mutationRate, float mutationStrength) {
-        hiddenLayer.mutate(mutationRate, mutationStrength);
-        outputLayer.mutate(mutationRate, mutationStrength);
-        if (meanAndStd && outputLogStd != null) {
-            outputLogStd.mutate(mutationRate, mutationStrength);
-        }
-    }
-
     void clipWeights() {
         hiddenLayer.clipAll();
         outputLayer.clipAll();
         if (meanAndStd && outputLogStd != null) {
             outputLogStd.clipAll();
         }
-    }
-
-    float weightL2() {
-        float sum = 0;
-        for (Neuron n : hiddenLayer.neurons) {
-            for (float w : n.weights) sum += w * w;
-            sum += n.bias * n.bias;
-        }
-        for (Neuron n : outputLayer.neurons) {
-            for (float w : n.weights) sum += w * w;
-            sum += n.bias * n.bias;
-        }
-        if (meanAndStd && outputLogStd != null) {
-            for (Neuron n : outputLogStd.neurons) {
-                for (float w : n.weights) sum += w * w;
-                sum += n.bias * n.bias;
-            }
-        }
-        return sum;
-    }
-
-    NeuralPolicy copy() {
-        NeuralPolicy clone = new NeuralPolicy(minCurl, maxCurl,
-                                              minSpeed, maxSpeed,
-                                              minAngleDeg, maxAngleDeg,
-                                              meanAndStd);
-        clone.hiddenLayer = hiddenLayer.copy();
-        clone.outputLayer = outputLayer.copy();
-        if (meanAndStd && outputLogStd != null) {
-            clone.outputLogStd = outputLogStd.copy();
-        }
-        return clone;
     }
 
     float[] convertState(ArrayList<Stone> playedStones, int stonesLeft, int lastStoneTeam) {

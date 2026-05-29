@@ -26,12 +26,14 @@ class ShotTypeSelector {
         this.numTypes  = ensemble.count;
         // Input size matches the expert policies' input encoding.
         this.inputSize = TOTAL_STONES * 4 + 2;
-        hiddenLayer = new NeuronLayer(hiddenSize, inputSize,  ActivationKind.RELU);
+        hiddenLayer = new NeuronLayer(hiddenSize, inputSize,
+                                      ActivationKind.RELU, NormKind.LAYERNORM);
         outputLayer = new NeuronLayer(numTypes,   hiddenSize, ActivationKind.LINEAR);
     }
 
     void reset() {
-        hiddenLayer = new NeuronLayer(hiddenSize, inputSize,  ActivationKind.RELU);
+        hiddenLayer = new NeuronLayer(hiddenSize, inputSize,
+                                      ActivationKind.RELU, NormKind.LAYERNORM);
         outputLayer = new NeuronLayer(numTypes,   hiddenSize, ActivationKind.LINEAR);
         updateCount = 0;
     }
@@ -71,6 +73,22 @@ class ShotTypeSelector {
         return best;
     }
 
+    int sampleTopKFromProbs(float[] p, float eps) {
+        float maxP = 0;
+        for (float v : p) maxP = max(maxP, v);
+        float sum = 0;
+        for (float v : p) if (v >= maxP - eps) sum += v;
+        if (sum <= 0) return argmaxFromProbs(p);
+        float r = random(sum);
+        float acc = 0;
+        for (int i = 0; i < p.length; i++) {
+            if (p[i] < maxP - eps) continue;
+            acc += p[i];
+            if (r <= acc) return i;
+        }
+        return argmaxFromProbs(p);
+    }
+
     // One training update. Randomizes a board at the given curriculum depth,
     // evaluates each expert's shot with the FinalScoreHeuristic, then trains
     // the selector toward the reward-weighted softmax target.
@@ -84,15 +102,24 @@ class ShotTypeSelector {
         NeuralPolicy refPolicy = ensemble.anyPolicy();
         float[] state = refPolicy.convertState(stones, stonesLeft, TEAM_RED);
 
-        // Evaluate each expert's mean shot via FinalScoreHeuristic.
+        // Evaluate each expert's mean shot via final score plus a type-specific hint.
         float[] rewards = new float[numTypes];
+        float[] finalRewards = new float[numTypes];
+        float[] typeRewards = new float[numTypes];
         FinalScoreHeuristic fsh = ensemble.finalHeuristic;
         for (int t = 0; t < numTypes; t++) {
             NeuralPolicy p = ensemble.trainers[t].policy;
             float[] expertState = p.convertState(stones, stonesLeft, TEAM_RED);
             Shot shot = p.predictMean(expertState);
             ShotResult result = simulateShot(shot, stones, depth - 1);
-            rewards[t] = fsh.contribute(fsh.scoreResult(result));
+            finalRewards[t] = fsh.contribute(fsh.scoreResult(result));
+            float typeReward = 0;
+            for (Heuristic h : ensemble.typeHeuristics[t]) {
+                if (h instanceof FinalScoreHeuristic) continue;
+                typeReward += h.contribute(h.scoreResult(result));
+            }
+            typeRewards[t] = typeReward;
+            rewards[t] = finalRewards[t] + SELECTOR_TYPE_REWARD_BLEND * typeReward;
         }
 
         // Build the target distribution from reward-weighted softmax.
@@ -132,6 +159,20 @@ class ShotTypeSelector {
                 if (i < numTypes - 1) print(", ");
             }
             println("]  H=" + nf(H, 0, 3));
+            print("  selectorReward=[");
+            for (int i = 0; i < numTypes; i++) {
+                print(ensemble.names[i] + ":" + nf(rewards[i], 0, 2)
+                      + "(F=" + nf(finalRewards[i], 0, 2)
+                      + ",T=" + nf(typeRewards[i], 0, 2) + ")");
+                if (i < numTypes - 1) print(", ");
+            }
+            println("]");
+            print("  selectorTarget=[");
+            for (int i = 0; i < numTypes; i++) {
+                print(ensemble.names[i] + ":" + nf(target[i], 0, 2));
+                if (i < numTypes - 1) print(", ");
+            }
+            println("]");
         }
     }
 

@@ -47,8 +47,16 @@ final int   SHOTS_PER_ROUND    = 50;    // shots sampled per expert per update
 final int   CURRICULUM_STEP    = 500;   // training steps before adding another stone depth
 final int   ROLLOUT_DEPTH_CAP  = 8;     // max rollout depth (TOTAL_STONES = full game)
 final float SELECTOR_ENTROPY   = 0.02f; // entropy bonus for shot-type selector
+final float EXPERT_ENTROPY     = 0.006f;// low-std support for shot experts
 final float SELECTOR_TEMP      = 1.0f;  // temperature for reward->target softmax
 final float SELECTOR_LR        = 0.001f;// selector network learning rate
+final float SELECTOR_TYPE_REWARD_BLEND = 0.30f; // finalScore + blend * type heuristic
+final boolean TEST_TOP_K_ENABLED = false; // debug: sample near-tied selector types in TEST
+final float TEST_TOP_K_EPS       = 0.02f; // probability window below max for TEST_TOP_K
+final boolean USE_ROLLOUT_DECISION = true; // evaluate expert shots by rollout before choosing
+final boolean SELECTOR_ZERO_BELOW_MEAN = true; // experts below mean selector prob cannot win
+final float DECISION_SELECTOR_WEIGHT = 1.0f; // boost from selector probability above mean
+final float DECISION_TYPE_HEURISTIC_WEIGHT = 0.30f; // blend type heuristic into rollout choice
 
 GradientEnsemble gradientEnsemble;
 ShotTypeSelector shotSelector;
@@ -127,8 +135,8 @@ int curriculumDepthCap() {
   return min(TOTAL_STONES, 1 + trainingDone / CURRICULUM_STEP);
 }
 
-// Dispatch inference using the shot-type selector.
-// sampleMode=true -> weighted-random (PLAY); false -> argmax (TEST).
+// Dispatch inference using selector-filtered rollout choice.
+// sampleMode is kept for diagnostics/legacy toggles; rollout decision is deterministic.
 Shot bestShotActive(ArrayList<Stone> layout, int stonesLeft, int lastTeam,
                     boolean logScores, boolean sampleMode) {
   return gradientEnsemble.bestShot(layout, stonesLeft, lastTeam,

@@ -29,7 +29,9 @@ class NeuralPolicy {
     static final float MIN_STD_CURL_TANH  = 0.15f;
     static final float MIN_STD_SPEED_TANH = 0.20f;
     static final float MIN_STD_ANGLE_DEG  = 0.50f;
-    static final float LOG_STD_MAX        =  1.0f;  // σ ≤ ~2.72
+    static final float MAX_STD_CURL_TANH  = 1.00f;
+    static final float MAX_STD_SPEED_TANH = 0.80f;
+    static final float MAX_STD_ANGLE_TANH = 0.80f;
 
     // Minimum σ in tanh space for action dimension i (0=curl, 1=speed, 2=angle).
     float minStdTanh(int dim) {
@@ -43,8 +45,18 @@ class NeuralPolicy {
         return log(minStdTanh(dim));
     }
 
+    float maxStdTanh(int dim) {
+        if (dim == 0) return MAX_STD_CURL_TANH;
+        if (dim == 1) return MAX_STD_SPEED_TANH;
+        return MAX_STD_ANGLE_TANH;
+    }
+
+    float logStdMax(int dim) {
+        return log(maxStdTanh(dim));
+    }
+
     float clampLogStd(int dim, float logStd) {
-        return constrain(logStd, logStdMin(dim), LOG_STD_MAX);
+        return constrain(logStd, logStdMin(dim), logStdMax(dim));
     }
 
     float sigmaFromLogStd(int dim, float logStd) {
@@ -53,6 +65,10 @@ class NeuralPolicy {
 
     boolean logStdAtMin(int dim, float logStd) {
         return logStd <= logStdMin(dim) + 1e-4f;
+    }
+
+    boolean logStdAtMax(int dim, float logStd) {
+        return logStd >= logStdMax(dim) - 1e-4f;
     }
 
     NeuronLayer hiddenLayer;
@@ -74,7 +90,8 @@ class NeuralPolicy {
         this.maxSpeed     = maxSpeed;
         this.minAngleDeg  = minAngleDeg;
         this.maxAngleDeg  = maxAngleDeg;
-        hiddenLayer = new NeuronLayer(hiddenSize, inputSize, HIDDEN_ACTIVATION);
+        hiddenLayer = new NeuronLayer(hiddenSize, inputSize,
+                                      HIDDEN_ACTIVATION, NormKind.LAYERNORM);
         outputLayer = new NeuronLayer(outputSize, hiddenSize, OUTPUT_ACTIVATION);
     }
 
@@ -98,7 +115,8 @@ class NeuralPolicy {
         this.minAngleDeg  = minAngleDeg;
         this.maxAngleDeg  = maxAngleDeg;
         this.meanAndStd   = meanAndStd;
-        hiddenLayer  = new NeuronLayer(hiddenSize, inputSize,  HIDDEN_ACTIVATION);
+        hiddenLayer  = new NeuronLayer(hiddenSize, inputSize,
+                                       HIDDEN_ACTIVATION, NormKind.LAYERNORM);
         outputLayer  = new NeuronLayer(outputSize, hiddenSize, OUTPUT_ACTIVATION);
         if (meanAndStd) {
             outputLogStd = new NeuronLayer(outputSize, hiddenSize, ActivationKind.LINEAR);
@@ -161,7 +179,7 @@ class NeuralPolicy {
     }
 
     NeuralPolicy expertGuard(boolean meanAndStd) {
-        return new NeuralPolicy(-0.5f, 0.5f, 12f, 18f, -6f, 6f, meanAndStd);
+        return new NeuralPolicy(-0.5f, 0.5f, 12f, 22f, -6f, 6f, meanAndStd);
     }
 
     NeuralPolicy expertFreeze() {
@@ -169,7 +187,7 @@ class NeuralPolicy {
     }
 
     NeuralPolicy expertFreeze(boolean meanAndStd) {
-        return new NeuralPolicy(-0.2f, 0.2f, 12f, 26f, -5f, 5f, meanAndStd);
+        return new NeuralPolicy(-0.2f, 0.2f, 14f, 27f, -5f, 5f, meanAndStd);
     }
 
     // ---- Forward pass helpers ----
@@ -368,9 +386,8 @@ class NeuralPolicy {
             } else {
                 state[i++] = 0;
                 state[i++] = 0;
-                int throwTeam = (slot % 2 == 0) ? TEAM_RED : TEAM_YELLOW;
-                state[i++] = throwTeam == TEAM_RED ? 1 : -1;
-                state[i++] = -1;
+                state[i++] = 0;
+                state[i++] = 0;
             }
         }
         state[i++] = stonesLeft / (float) STONES_PER_TEAM;

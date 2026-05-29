@@ -126,6 +126,11 @@ class TakeoutHeuristic extends Heuristic {
         for (Stone before : result.stonesBefore) {
             if (before.team != TEAM_RED) continue;
             float distBefore = house.distanceToButton(before);
+            boolean wasHouseStone = before.hogPassed && house.inHouse(before);
+            boolean wasGuard = before.hogPassed
+                && !house.inHouse(before)
+                && before.pos.y < house.BUTTON.y
+                && before.pos.y > sheet.hogY;
 
             // Find the closest red stone in stonesAfter matching approximate pre-position
             Stone matchAfter = null;
@@ -139,30 +144,30 @@ class TakeoutHeuristic extends Heuristic {
                 }
             }
 
-            if (matchAfter == null) {
+            boolean removed = matchAfter == null || minMove > before.radius * 4.0f;
+            if (removed) {
                 // Red stone removed entirely (swept off ice)
-                displacementBonus += 2.0;
+                displacementBonus += 3.0;
+                if (wasHouseStone) displacementBonus += 2.0;
+                if (wasGuard) displacementBonus += 1.5;
             } else {
                 float distAfter = house.distanceToButton(matchAfter);
-                // Was this stone a guard (in front of house but not in house)?
-                boolean wasGuard = before.hogPassed
-                    && !house.inHouse(before)
-                    && before.pos.y < house.BUTTON.y;
                 // Bonus for moving it further from center
                 float pushed = max(0, distAfter - distBefore);
-                displacementBonus += pushed * 0.4;
+                displacementBonus += pushed * 0.8;
+                if (minMove > 0.75f) displacementBonus += min(1.5f, minMove * 0.4f);
                 // Extra bonus for removing it from the house
-                if (house.inHouse(before) && !house.inHouse(matchAfter)) {
-                    displacementBonus += 1.5;
+                if (wasHouseStone && !house.inHouse(matchAfter)) {
+                    displacementBonus += 2.0;
                 }
                 // Bonus for clearing a guard
                 if (wasGuard && !house.inHouse(matchAfter) && matchAfter.pos.y >= house.BUTTON.y) {
-                    displacementBonus += 1.0;
+                    displacementBonus += 1.5;
                 }
             }
         }
 
-        return scoreDelta + displacementBonus * 0.5;
+        return scoreDelta + displacementBonus * 0.7;
     }
 }
 
@@ -185,24 +190,31 @@ class GuardHeuristic extends Heuristic {
         float teeY = house.BUTTON.y;
         float hogY = sheet.hogY;
         if (!fired.hogPassed) return -1.0;
-        if (house.inHouse(fired)) return -0.5; // too deep — actually in house
-        if (fired.pos.y > teeY) return -0.5;   // past tee line, too deep
+        if (house.inHouse(fired)) return -1.4; // guards should not become draws
+        if (fired.pos.y > teeY) return -0.8;   // past tee line, too deep
 
         // How close to the center line (ideal guard position)?
         float lateralOffset = abs(fired.pos.x - sheet.centerX);
         float lateralScore = max(0, 1.0 - lateralOffset / (sheet.SHEET_WIDTH_FT * 0.35));
 
-        // How far in front of the house? Ideal is just outside the 12-foot ring.
-        float distFromButton = house.distanceToButton(fired);
-        float idealDist = house.OUTER_RING + 1.5; // ~7.5 ft: just outside house
-        float depthScore = max(0, 1.0 - abs(distFromButton - idealDist) / 4.0);
+        // Guard depth target: just beyond the hog line, not near/in the house.
+        float guardTargetY = hogY + 2.0f;
+        float depthScore = max(0, 1.0 - abs(fired.pos.y - guardTargetY) / 5.0);
+        float deepPenalty = max(0, (fired.pos.y - (hogY + 8.0f)) / 10.0);
 
         // Coverage: how much does this stone block access to the button/own stones?
         // Model as: reward fraction of horizontal "shadow" cast toward the button
         // that is not already covered by existing yellow guards.
         float newCoverage = guardCoverageAdded(fired, result.stonesBefore);
+        float protectsStone = protectsImportantStone(fired, result.stonesBefore);
+        float speedPenalty = max(0, result.plannedShot.speed - 19f) / 3.0f;
 
-        return lateralScore * 0.4 + depthScore * 0.4 + newCoverage * 1.2;
+        return lateralScore * 0.25
+             + depthScore * 0.75
+             + newCoverage * 1.0
+             + protectsStone * 0.6
+             - speedPenalty * 0.45
+             - deepPenalty * 0.8;
     }
 
     // Approximate the new coverage added by the fired stone.
@@ -229,6 +241,24 @@ class GuardHeuristic extends Heuristic {
         }
         float addedCoverage = max(0, stoneDiam - existingCoverage);
         return addedCoverage / stoneDiam; // 0..1
+    }
+
+    private float protectsImportantStone(Stone fired, ArrayList<Stone> before) {
+        Stone target = null;
+        float bestDist = Float.MAX_VALUE;
+        for (Stone s : before) {
+            if (s.team != TEAM_YELLOW) continue;
+            if (!s.hogPassed || !house.inHouse(s)) continue;
+            float d = house.distanceToButton(s);
+            if (d < bestDist) { bestDist = d; target = s; }
+        }
+        PVector targetPos = target != null ? target.pos : house.BUTTON;
+        if (fired.pos.y >= targetPos.y) return 0;
+        float dx = abs(fired.pos.x - targetPos.x);
+        float laneScore = max(0, 1.0 - dx / (fired.radius * 3.0));
+        float dy = targetPos.y - fired.pos.y;
+        float distanceScore = max(0, 1.0 - abs(dy - (house.OUTER_RING + 1.0f)) / 6.0);
+        return laneScore * distanceScore;
     }
 }
 

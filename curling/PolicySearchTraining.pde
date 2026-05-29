@@ -111,9 +111,9 @@ class CombinedHeuristic extends Heuristic {
         }
 
         // Punishments
-        if (fired.pos.x < 0 || fired.pos.x > sheet.SHEET_WIDTH_FT) return -1;
-        if (fired.pos.y + fired.radius < sheet.hogY) return -1;
-        if (!house.inHouse(fired)) return -0.7;
+        if (fired.pos.x < 0 || fired.pos.x > sheet.SHEET_WIDTH_FT) return -0.8;
+        if (fired.pos.y + fired.radius < sheet.hogY) return -0.8;
+        if (!house.inHouse(fired)) return -0.6;
 
         // Count yellow stones in house before and after
         int yellowBefore = 0, yellowAfter = 0;
@@ -141,6 +141,31 @@ class CombinedHeuristic extends Heuristic {
         return scoreReward * 0.8 + distanceReward * 0.2 + allyKnockout + enemyKnockout;
     }
 }
+
+Stone simulateAndGetResult(NeuralPolicy policy, float[] state, ArrayList<Stone> stones) {
+    ArrayList<Stone> simStones = new ArrayList<Stone>();
+    for (Stone s : stones) {
+        Stone c = new Stone(s.pos.x, s.pos.y, s.team);
+        c.hogPassed = s.hogPassed;
+        simStones.add(c);
+    }
+    Shot shot = policy.predict(state);
+    PVector h = sheet.hackWorld();
+    Stone fired = new Stone(h.x, h.y, TEAM_YELLOW);
+    fired.curl = constrain(shot.curl, -1, 1);
+    fired.vel.set(sin(shot.angle) * shot.speed, cos(shot.angle) * shot.speed);
+    simStones.add(fired);
+
+    for (int step = 0; step < 100000; step++) {
+        physics.step(simStones, DT);
+        boolean anyMoving = false;
+        for (Stone s : simStones) if (s.isMoving()) { anyMoving = true; break; }
+        if (!anyMoving) break;
+    }
+    // Return the fired stone's final position
+    return fired;
+}
+
 class PolicySearchTraining {
     NeuralPolicy current;
     NeuralPolicy mutated;
@@ -157,7 +182,7 @@ class PolicySearchTraining {
     }
 
     // Compare policies in a simulated scenario where AI has the last stone with simulated random stone layouts.
-    void comparePolicies(Heuristic heuristic) {
+/*     void comparePolicies(Heuristic heuristic) {
         float currentScoreSum = 0;
         float mutatedScoreSum = 0;
         for (int i = 0; i < heuristic.shotsPerComparison; i++) {
@@ -178,5 +203,43 @@ class PolicySearchTraining {
         }
         mutated = current.copy();
         mutated.mutate(mutationRate, mutationStrength);
+    } */
+void comparePolicies(Heuristic heuristic) {
+    float currentScoreSum = 0;
+    float mutatedScoreSum = 0;
+
+    for (int i = 0; i < heuristic.shotsPerComparison; i++) {
+        ArrayList<Stone> currentStones = new ArrayList<Stone>();
+        ArrayList<Stone> mutatedStones = new ArrayList<Stone>();
+
+        for (int shot = 0; shot < STONES_PER_TEAM; shot++) {
+            Heuristic shotHeuristic = new CombinedHeuristic();
+
+            float[] currentState = current.convertState(currentStones, STONES_PER_TEAM - shot, TEAM_RED);
+            float[] mutatedState = mutated.convertState(mutatedStones, STONES_PER_TEAM - shot, TEAM_RED);
+
+            currentScoreSum += shotHeuristic.simulateShot(current, currentState, currentStones);
+            mutatedScoreSum += shotHeuristic.simulateShot(mutated, mutatedState, mutatedStones);
+
+            // Add fired stone result back to each layout
+            Stone currentResult = simulateAndGetResult(current, currentState, currentStones);
+            Stone mutatedResult = simulateAndGetResult(mutated, mutatedState, mutatedStones);
+            currentStones.add(currentResult);
+            mutatedStones.add(mutatedResult);
+
+            // Place a random red stone after each yellow shot
+            if (shot < STONES_PER_TEAM - 1) {
+                randomState.placeOneStone(currentStones, TEAM_RED);
+                randomState.placeOneStone(mutatedStones, TEAM_RED);
+            }
+        }
     }
+
+    if (mutatedScoreSum > currentScoreSum) {
+        current = mutated.copy();
+        current.saveToFile("data/policy.txt");
+    }
+    mutated = current.copy();
+    mutated.mutate(mutationRate, mutationStrength);
+}
 }

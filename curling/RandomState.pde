@@ -29,6 +29,9 @@ class RandomState{
         s.hogPassed = true;
         stones.add(s);
     }
+    void placeOneStone(ArrayList<Stone> stones, int team) {
+      placeStone(stones, team);
+    }
 
   private boolean overlaps(PVector p, ArrayList<Stone> stones) {
     for (Stone s : stones) {

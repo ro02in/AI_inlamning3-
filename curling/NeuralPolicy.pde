@@ -46,7 +46,10 @@ class NeuralPolicy {
                 state[i++] = s.team == TEAM_RED ? 0 : 1;
                 state[i++] = 1;
             } else {
-                i += 4;
+                state[i++] = 0;
+                state[i++] = 0;
+                state[i++] = 0;
+                state[i++] = 0;
             }
         }
         state[i++] = stonesLeft / (float) STONES_PER_TEAM;

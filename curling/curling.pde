@@ -88,13 +88,24 @@ void draw() {
 
   if (appMode == AppMode.TRAINING && trainingActive) {
     //trainer.comparePolicies(new CloseToButtonHeuristic());
-    trainer.comparePolicies(new CombinedHeuristic());
+/*     trainer.comparePolicies(new CombinedHeuristic());
     trainingDone++;
     if (trainingDone >= trainingTarget) {
       trainingActive = false;
       appMode = AppMode.PLAY;
       aiPolicy = trainer.current.copy();
       trainingStatus = "Klar!";
+    } */
+    for (int i = 0; i < 10; i++) {
+      trainer.comparePolicies(new CombinedHeuristic());
+      trainingDone++;
+      if (trainingDone >= trainingTarget) {
+          trainingActive = false;
+          appMode = AppMode.PLAY;
+          aiPolicy = trainer.current.copy();
+          trainingStatus = "Klar!";
+          break;
+      }
     }
   } else if (appMode == AppMode.TEST) {
     updateAiTest();

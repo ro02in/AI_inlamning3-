@@ -211,6 +211,8 @@ class UI {
   TimingBar  angleBar;
   TimingBar  speedBar;
   Button     shootBtn;
+  Button     resetGameBtn;
+  Button     startPlayerBtn;
   Button     rndStateBtn;
   Button     datasetBtn;
   Button     expertNextBtn;
@@ -237,8 +239,9 @@ class UI {
 
   final float STATS_TOP    =  16;
   final float STATS_BOTTOM = 108;
-  final float SLIDER_TOP   = 178;
-  final float SLIDER_H     = 495;
+  final float GAME_BTN_TOP = 154;
+  final float SLIDER_TOP   = 204;
+  final float SLIDER_H     = 469;
   final float BAR_Y        = 708;
   final float BAR_H        =  20;
   final float BTN_TOP      = 736;
@@ -277,6 +280,8 @@ class UI {
     float halfX   = ICE_W + (SIDEBAR_W - btnW) * 0.5f;
 
     shootBtn = new Button("L\u00e5s vinkel", halfX, BTN_TOP, btnW, 52);
+    resetGameBtn = new Button("Ny match", halfX, GAME_BTN_TOP, halfW, 28);
+    startPlayerBtn = new Button("Start: Rod", halfX + halfW + 6, GAME_BTN_TOP, halfW, 28);
 
     trainBtn = new Button("Trana",    halfX,          TRAIN_BTN_TOP, halfW, 40);
     testBtn  = new Button("Testa AI", halfX + halfW + 6, TRAIN_BTN_TOP, halfW, 40);
@@ -373,6 +378,15 @@ class UI {
     if (showLockBars) activeBar().draw();
 
     if (recordMode()) drawRecordPanel();
+
+    if (!recordMode()) {
+      resetGameBtn.label = "Ny match";
+      resetGameBtn.enabled = appMode != AppMode.RECORD;
+      resetGameBtn.draw();
+      startPlayerBtn.label = game.startingTeam == TEAM_RED ? "Start: Rod" : "Start: Gul";
+      startPlayerBtn.enabled = appMode != AppMode.RECORD;
+      startPlayerBtn.draw();
+    }
 
     if (appMode == AppMode.TEST) {
       shootBtn.label   = aiTestSimulating ? "..." : "Nasta test";
@@ -625,6 +639,28 @@ class UI {
     }
   }
 
+  void resetGameNow() {
+    if (trainingActive) {
+      trainingActive = false;
+      trainingPreview.reset();
+    }
+    if (appMode == AppMode.TEST) stopAiTest();
+    if (appMode == AppMode.RECORD) stopRecordMode();
+    appMode = AppMode.PLAY;
+    game.reset();
+  }
+
+  void toggleStartingPlayer() {
+    if (trainingActive) {
+      trainingActive = false;
+      trainingPreview.reset();
+    }
+    if (appMode == AppMode.TEST) stopAiTest();
+    if (appMode == AppMode.RECORD) stopRecordMode();
+    appMode = AppMode.PLAY;
+    game.toggleStartingTeam();
+  }
+
   void setRndStones() {
     RandomState rs = new RandomState();
     rs.randomize(game.stones, STONES_PER_TEAM);
@@ -645,6 +681,9 @@ class UI {
       if (activeSlider != null) { activeSlider.dragging = true; activeSlider.setFromMouseY(my); }
       return;
     }
+
+    if (resetGameBtn.enabled && resetGameBtn.hits(mx, my)) { resetGameNow(); return; }
+    if (startPlayerBtn.enabled && startPlayerBtn.hits(mx, my)) { toggleStartingPlayer(); return; }
 
     if (trainBtn.enabled      && trainBtn.hits(mx, my))      {
       if (trainingActive) cancelTraining(); else startTraining(trainComparisons); return;
@@ -686,6 +725,8 @@ class UI {
 
   void onMouseMoved(float mx, float my) {
     shootBtn.hover      = shootBtn.hits(mx, my);
+    resetGameBtn.hover  = resetGameBtn.hits(mx, my);
+    startPlayerBtn.hover = startPlayerBtn.hits(mx, my);
     trainBtn.hover      = trainBtn.hits(mx, my);
     testBtn.hover       = testBtn.hits(mx, my);
     resetModelBtn.hover = resetModelBtn.hits(mx, my);

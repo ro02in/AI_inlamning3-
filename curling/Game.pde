@@ -30,6 +30,7 @@ class Game {
   GameState        state;
   ArrayList<Stone> stones;
   int              currentTeam;   // TEAM_RED or TEAM_YELLOW
+  int              startingTeam = TEAM_RED;
   int              stonesThrown;  // 0..TOTAL_STONES
 
   // Result of scoring (set when state becomes ENDED).
@@ -43,19 +44,28 @@ class Game {
   void reset() {
     stones        = new ArrayList<Stone>();
     state         = GameState.AIMING;
-    currentTeam   = TEAM_RED;
+    currentTeam   = startingTeam;
     stonesThrown  = 0;
     winningTeam   = -1;
     winningPoints = 0;
     if (ui != null) ui.onTurnStart();
   }
 
+  void toggleStartingTeam() {
+    startingTeam = (startingTeam == TEAM_RED) ? TEAM_YELLOW : TEAM_RED;
+    reset();
+  }
+
+  int teamForThrowIndex(int throwIndex) {
+    if (throwIndex % 2 == 0) return startingTeam;
+    return startingTeam == TEAM_RED ? TEAM_YELLOW : TEAM_RED;
+  }
+
   // Number of stones each team has left to throw.
   int stonesRemaining(int team) {
     int thrownByTeam = 0;
     for (int i = 0; i < stonesThrown; i++) {
-      // i=0 is RED (first thrower); teams alternate.
-      int t = (i % 2 == 0) ? TEAM_RED : TEAM_YELLOW;
+      int t = teamForThrowIndex(i);
       if (t == team) thrownByTeam++;
     }
     return STONES_PER_TEAM - thrownByTeam;

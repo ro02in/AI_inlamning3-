@@ -13,6 +13,8 @@ class GradientEnsemble {
     PolicyDiagnostics diagnostics = new PolicyDiagnostics();
     FinalScoreHeuristic finalHeuristic = new FinalScoreHeuristic();
     float[] lastAdjustedSelectorProbs;
+    float[] lastRolloutRankProbs;
+    float[] lastFinalDecisionProbs;
     float[] lastDecisionScores;
     float[] lastRolloutScores;
     float[] lastTypeScores;
@@ -103,7 +105,7 @@ class GradientEnsemble {
         }
 
         if (USE_ROLLOUT_DECISION) {
-            chosen = chooseByRollout(layout, stonesLeft, lastTeam, probs);
+            chosen = chooseByRollout(layout, stonesLeft, lastTeam, probs, selector);
         } else if (selector != null) {
             if (sampleMode) {
                 chosen = selector.sampleFromProbs(probs);
@@ -129,8 +131,13 @@ class GradientEnsemble {
         return best;
     }
 
-    int chooseByRollout(ArrayList<Stone> layout, int stonesLeft, int lastTeam, float[] probs) {
-        lastAdjustedSelectorProbs = adjustedSelectorProbs(probs);
+    int chooseByRollout(ArrayList<Stone> layout, int stonesLeft, int lastTeam,
+                        float[] probs, ShotTypeSelector selector) {
+        lastAdjustedSelectorProbs = selector != null
+            ? selector.relativeOdds(probs)
+            : uniformProbs(count);
+        lastRolloutRankProbs = new float[count];
+        lastFinalDecisionProbs = new float[count];
         lastDecisionScores = new float[count];
         lastRolloutScores = new float[count];
         lastTypeScores = new float[count];
@@ -138,49 +145,58 @@ class GradientEnsemble {
 
         int fallback = argmaxArray(probs);
         int chosen = fallback;
-        float bestScore = Float.NEGATIVE_INFINITY;
         for (int i = 0; i < count; i++) {
-            boolean candidate = !SELECTOR_ZERO_BELOW_MEAN || lastAdjustedSelectorProbs[i] > 0;
-            lastDecisionCandidates[i] = candidate;
-            if (!candidate) {
-                lastDecisionScores[i] = Float.NEGATIVE_INFINITY;
-                continue;
-            }
-
             Shot shot = expertMeanShot(i, layout, stonesLeft, lastTeam);
             ShotResult result = simulateCandidateShot(shot, layout, rolloutShotsRemainingAfter(stonesLeft));
             lastRolloutScores[i] = finalHeuristic.contribute(finalHeuristic.scoreResult(result));
             lastTypeScores[i] = typeHeuristicScore(i, result);
+        }
 
-            float meanProb = 1.0f / max(1, count);
-            float selectorBoost = max(0, (probs[i] - meanProb) / max(meanProb, 1e-6f));
-            lastDecisionScores[i] = lastRolloutScores[i]
-                                  + DECISION_TYPE_HEURISTIC_WEIGHT * lastTypeScores[i]
-                                  + DECISION_SELECTOR_WEIGHT * selectorBoost;
+        assignTopFourRolloutOdds();
+
+        float bestScore = Float.NEGATIVE_INFINITY;
+        for (int i = 0; i < count; i++) {
+            lastFinalDecisionProbs[i] = DECISION_NN_WEIGHT * lastAdjustedSelectorProbs[i]
+                                      + DECISION_FINAL_SCORE_WEIGHT * lastRolloutRankProbs[i];
+            lastDecisionScores[i] = lastFinalDecisionProbs[i];
+            lastDecisionCandidates[i] = lastFinalDecisionProbs[i] > 0;
+
             if (lastDecisionScores[i] > bestScore) {
                 bestScore = lastDecisionScores[i];
                 chosen = i;
             }
         }
+        if (bestScore <= 0) chosen = fallback;
         return chosen;
     }
 
-    float[] adjustedSelectorProbs(float[] probs) {
-        float[] adjusted = new float[count];
-        float mean = 0;
-        for (float p : probs) mean += p;
-        mean /= max(1, probs.length);
-        float sum = 0;
-        for (int i = 0; i < count; i++) {
-            adjusted[i] = SELECTOR_ZERO_BELOW_MEAN ? max(0, probs[i] - mean) : probs[i];
-            sum += adjusted[i];
+    void assignTopFourRolloutOdds() {
+        int[] order = rankedIndices(lastRolloutScores);
+        float[] weights = { 0.50f, 0.25f, 0.125f, 0.125f };
+        for (int rank = 0; rank < min(4, order.length); rank++) {
+            lastRolloutRankProbs[order[rank]] = weights[rank];
         }
-        if (sum <= 1e-6f) {
-            adjusted[argmaxArray(probs)] = 1;
-            return adjusted;
+    }
+
+    int[] rankedIndices(float[] values) {
+        int[] idx = new int[values.length];
+        for (int i = 0; i < values.length; i++) idx[i] = i;
+        for (int i = 1; i < idx.length; i++) {
+            int key = idx[i];
+            int j = i - 1;
+            while (j >= 0 && values[idx[j]] < values[key]) {
+                idx[j + 1] = idx[j];
+                j--;
+            }
+            idx[j + 1] = key;
         }
-        for (int i = 0; i < count; i++) adjusted[i] /= sum;
-        return adjusted;
+        return idx;
+    }
+
+    float[] uniformProbs(int n) {
+        float[] p = new float[n];
+        for (int i = 0; i < n; i++) p[i] = 1.0f / max(1, n);
+        return p;
     }
 
     int argmaxArray(float[] values) {

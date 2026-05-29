@@ -20,6 +20,9 @@ class ShotTypeSelector {
 
     int updateCount = 0;
     int logEvery    = 200;
+    float[] baselineProbs;
+    float[] baselineWindowSums;
+    int baselineWindowCount = 0;
 
     ShotTypeSelector(GradientEnsemble ensemble) {
         this.ensemble  = ensemble;
@@ -29,6 +32,7 @@ class ShotTypeSelector {
         hiddenLayer = new NeuronLayer(hiddenSize, inputSize,
                                       ActivationKind.RELU, NormKind.LAYERNORM);
         outputLayer = new NeuronLayer(numTypes,   hiddenSize, ActivationKind.LINEAR);
+        initBaseline();
     }
 
     void reset() {
@@ -36,6 +40,7 @@ class ShotTypeSelector {
                                       ActivationKind.RELU, NormKind.LAYERNORM);
         outputLayer = new NeuronLayer(numTypes,   hiddenSize, ActivationKind.LINEAR);
         updateCount = 0;
+        initBaseline();
     }
 
     // Compute softmax probabilities for the given state.
@@ -87,6 +92,42 @@ class ShotTypeSelector {
             if (r <= acc) return i;
         }
         return argmaxFromProbs(p);
+    }
+
+    void initBaseline() {
+        baselineProbs = new float[numTypes];
+        baselineWindowSums = new float[numTypes];
+        baselineWindowCount = 0;
+        for (int i = 0; i < numTypes; i++) baselineProbs[i] = 1.0f / max(1, numTypes);
+    }
+
+    float[] relativeOdds(float[] p) {
+        if (baselineProbs == null || baselineProbs.length != p.length) initBaseline();
+        float[] odds = new float[p.length];
+        float sum = 0;
+        for (int i = 0; i < p.length; i++) {
+            odds[i] = max(0, p[i] - baselineProbs[i]);
+            sum += odds[i];
+        }
+        if (sum <= 1e-6f) {
+            odds[argmaxFromProbs(p)] = 1;
+            return odds;
+        }
+        for (int i = 0; i < odds.length; i++) odds[i] /= sum;
+        return odds;
+    }
+
+    void updateBaselineWindow(float[] p) {
+        if (baselineProbs == null || baselineProbs.length != p.length) initBaseline();
+        for (int i = 0; i < p.length; i++) baselineWindowSums[i] += p[i];
+        baselineWindowCount++;
+        if (baselineWindowCount >= SELECTOR_BASELINE_WINDOW) {
+            for (int i = 0; i < p.length; i++) {
+                baselineProbs[i] = baselineWindowSums[i] / max(1, baselineWindowCount);
+                baselineWindowSums[i] = 0;
+            }
+            baselineWindowCount = 0;
+        }
     }
 
     // One training update. Randomizes a board at the given curriculum depth,
@@ -151,6 +192,7 @@ class ShotTypeSelector {
         hiddenLayer.backward(gradHidden, SELECTOR_LR);
 
         updateCount++;
+        updateBaselineWindow(pred);
         boolean shouldLog = (updateCount == 1 || updateCount % logEvery == 0);
         if (shouldLog) {
             print("Selector step " + updateCount + "  depth=" + depth + "  probs=[");
@@ -170,6 +212,12 @@ class ShotTypeSelector {
             print("  selectorTarget=[");
             for (int i = 0; i < numTypes; i++) {
                 print(ensemble.names[i] + ":" + nf(target[i], 0, 2));
+                if (i < numTypes - 1) print(", ");
+            }
+            println("]");
+            print("  selectorBaseline=[");
+            for (int i = 0; i < numTypes; i++) {
+                print(ensemble.names[i] + ":" + nf(baselineProbs[i], 0, 2));
                 if (i < numTypes - 1) print(", ");
             }
             println("]");
@@ -236,6 +284,14 @@ class ShotTypeSelector {
     void appendSave(StringBuilder sb) {
         sb.append("@selector\n");
         sb.append("update_count=").append(updateCount).append('\n');
+        if (baselineProbs != null) {
+            sb.append("baseline_probs=");
+            for (int i = 0; i < baselineProbs.length; i++) {
+                if (i > 0) sb.append(' ');
+                sb.append(baselineProbs[i]);
+            }
+            sb.append('\n');
+        }
         hiddenLayer.appendSave(sb, "sel_hidden");
         outputLayer.appendSave(sb, "sel_output");
         sb.append("@end\n");
@@ -249,6 +305,15 @@ class ShotTypeSelector {
             if (line.equals("@end")) return idx + 1;
             if (line.startsWith("update_count=")) {
                 updateCount = parseInt(line.substring(13));
+                idx++;
+                continue;
+            }
+            if (line.startsWith("baseline_probs=")) {
+                String[] parts = split(trim(line.substring(15)), ' ');
+                if (baselineProbs == null || baselineProbs.length != numTypes) initBaseline();
+                for (int i = 0; i < min(numTypes, parts.length); i++) {
+                    baselineProbs[i] = parseFloat(parts[i]);
+                }
                 idx++;
                 continue;
             }

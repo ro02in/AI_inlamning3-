@@ -67,16 +67,12 @@ class PolicyDiagnostics {
     if (ensemble.lastDecisionScores == null || ensemble.lastAdjustedSelectorProbs == null) return;
     println("-- rollout decision --");
     for (int i = 0; i < ensemble.count; i++) {
-      boolean candidate = ensemble.lastDecisionCandidates == null
-                       || ensemble.lastDecisionCandidates[i];
-      String score = candidate
-          ? nf(ensemble.lastDecisionScores[i], 0, 3)
-          : "masked";
       println("  " + ensemble.names[i]
-              + "  pAdj=" + nf(ensemble.lastAdjustedSelectorProbs[i], 0, 3)
+              + "  nnOdds=" + nf(ensemble.lastAdjustedSelectorProbs[i], 0, 3)
+              + "  rolloutOdds=" + nf(ensemble.lastRolloutRankProbs[i], 0, 3)
               + "  rollout=" + nf(ensemble.lastRolloutScores[i], 0, 3)
               + "  type=" + nf(ensemble.lastTypeScores[i], 0, 3)
-              + "  combined=" + score
+              + "  finalProb=" + nf(ensemble.lastFinalDecisionProbs[i], 0, 3)
               + (i == chosen ? "  *BEST*" : ""));
     }
   }

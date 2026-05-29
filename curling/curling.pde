@@ -54,9 +54,9 @@ final float SELECTOR_TYPE_REWARD_BLEND = 0.30f; // finalScore + blend * type heu
 final boolean TEST_TOP_K_ENABLED = false; // debug: sample near-tied selector types in TEST
 final float TEST_TOP_K_EPS       = 0.02f; // probability window below max for TEST_TOP_K
 final boolean USE_ROLLOUT_DECISION = true; // evaluate expert shots by rollout before choosing
-final boolean SELECTOR_ZERO_BELOW_MEAN = true; // experts below mean selector prob cannot win
-final float DECISION_SELECTOR_WEIGHT = 1.0f; // boost from selector probability above mean
-final float DECISION_TYPE_HEURISTIC_WEIGHT = 0.30f; // blend type heuristic into rollout choice
+final int SELECTOR_BASELINE_WINDOW = 500; // steps used to refresh selector mean probabilities
+final float DECISION_NN_WEIGHT = 0.50f; // relative selector odds contribution
+final float DECISION_FINAL_SCORE_WEIGHT = 0.50f; // rollout top-4 odds contribution
 
 GradientEnsemble gradientEnsemble;
 ShotTypeSelector shotSelector;

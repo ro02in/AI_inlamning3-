@@ -176,12 +176,14 @@ class Button {
   float   x, y, w, h;
   boolean enabled;
   boolean hover;
+  boolean selected;
 
   Button(String label, float x, float y, float w, float h) {
     this.label = label;
     this.x = x; this.y = y; this.w = w; this.h = h;
-    this.enabled = true;
-    this.hover   = false;
+    this.enabled  = true;
+    this.hover    = false;
+    this.selected = false;
   }
 
   boolean hits(float mx, float my) {
@@ -192,10 +194,18 @@ class Button {
     pushStyle();
     rectMode(CORNER);
     noStroke();
-    if (!enabled)     fill(60);
-    else if (hover)   fill(70, 140, 200);
-    else              fill(50, 110, 170);
+    if (!enabled)        fill(60);
+    else if (selected)   fill(50, 160, 80);
+    else if (hover)      fill(70, 140, 200);
+    else                 fill(50, 110, 170);
     rect(x, y, w, h, 6);
+    if (selected) {
+      stroke(120, 220, 130);
+      strokeWeight(2);
+      noFill();
+      rect(x + 1, y + 1, w - 2, h - 2, 5);
+      noStroke();
+    }
     fill(enabled ? 255 : 140);
     textAlign(CENTER, CENTER);
     textSize(16);
@@ -214,41 +224,35 @@ class UI {
   Button     resetGameBtn;
   Button     startPlayerBtn;
   Button     rndStateBtn;
-  Button     datasetBtn;
-  Button     expertNextBtn;
-  Button     expertNewBtn;
-  Button     expertExitBtn;
   Button     trainBtn;
   Button     testBtn;
-  Button     resetModelBtn;
-  Button     saveModelBtn;
-  Button     loadModelBtn;
+  Button     RndSampBtn;
+  Button     NNBtn;
   Slider     activeSlider;
 
   int        trainComparisons = 100;
   boolean    draggingTrainBar = false;
   final int  TRAIN_MIN = 10;
   final int  TRAIN_MAX = 1000000;
-  final float TRAIN_BAR_Y = 114;
-  final float TRAIN_BAR_H = 10;
-  final float AI_STATUS_Y = 134;
+  final float STATS_TOP    =  16;
+  final float STATS_BOTTOM = 108;
+  final float GAME_BTN_TOP     = 136;
+  final float EXTRA_BTN_TOP    = 194;
+  final float TRAIN_BAR_Y      = 276;
+  final float TRAIN_BAR_H      = 10;
+  final float AI_STATUS_Y      = 290;
+  final float TRAIN_BTN_TOP    = 321;
+  final float SLIDER_TOP   = 395;
+  final float SLIDER_H     = 430;
+  final float BAR_Y        = 866;
+  final float BAR_H        =  20;
+  final float BTN_TOP      = 900;
+  final float DATASET_BTN_TOP  = 882;
+  final float EXPERT_BTN_TOP   = TRAIN_BTN_TOP;
 
   final int PHASE_ANGLE = 0;
   final int PHASE_SPEED = 1;
   int lockPhase;
-
-  final float STATS_TOP    =  16;
-  final float STATS_BOTTOM = 108;
-  final float GAME_BTN_TOP = 154;
-  final float SLIDER_TOP   = 204;
-  final float SLIDER_H     = 469;
-  final float BAR_Y        = 708;
-  final float BAR_H        =  20;
-  final float BTN_TOP      = 736;
-  final float TRAIN_BTN_TOP    = 794;
-  final float EXTRA_BTN_TOP    = 840;
-  final float DATASET_BTN_TOP  = 882;
-  final float EXPERT_BTN_TOP   = TRAIN_BTN_TOP;
 
   final float LOCK_BASE_HZ            = 0.7;
   final float LOCK_CURL_HZ_MULT       = 1.1;
@@ -286,32 +290,40 @@ class UI {
     trainBtn = new Button("Trana",    halfX,          TRAIN_BTN_TOP, halfW, 40);
     testBtn  = new Button("Testa AI", halfX + halfW + 6, TRAIN_BTN_TOP, halfW, 40);
 
-    resetModelBtn = new Button("Ny modell",
+
+    rndStateBtn = new Button("Slump",
                                halfX,
                                EXTRA_BTN_TOP,
-                               quarterW, 36);
-    saveModelBtn  = new Button("Spara",
-                               halfX + quarterW + 6,
-                               EXTRA_BTN_TOP,
-                               quarterW, 36);
-    loadModelBtn  = new Button("Ladda",
-                               halfX + (quarterW + 6) * 2,
-                               EXTRA_BTN_TOP,
-                               quarterW, 36);
-    rndStateBtn   = new Button("Rand",
-                               halfX + (quarterW + 6) * 3,
-                               EXTRA_BTN_TOP,
-                               quarterW, 36);
+                               thirdW, 36);
 
-    datasetBtn = new Button("Expert dataset", halfX, DATASET_BTN_TOP, btnW, 36);
+    RndSampBtn  = new Button("MC AI",
+                               halfX,
+                               EXTRA_BTN_TOP,
+                               halfW, 36);
+
+    NNBtn       = new Button("NN",
+                               halfX + halfW + 6,
+                               EXTRA_BTN_TOP,
+                               halfW, 36);
 
     float expertGap    = 6;
     float expertThirdW = (btnW - expertGap * 2) / 3.0f;
-    expertNextBtn = new Button("N\u00e4sta", halfX,                                  EXPERT_BTN_TOP, expertThirdW, 40);
-    expertNewBtn  = new Button("Ny state",  halfX + expertThirdW + expertGap,        EXPERT_BTN_TOP, expertThirdW, 40);
-    expertExitBtn = new Button("Avsluta",   halfX + (expertThirdW + expertGap) * 2,  EXPERT_BTN_TOP, expertThirdW, 40);
-
     lockPhase = PHASE_ANGLE;
+  }
+
+  void sectionLabel(String txt, float y) {
+    pushStyle();
+    float left  = ICE_W + 14;
+    float right = ICE_W + SIDEBAR_W - 14;
+    fill(110);
+    noStroke();
+    textAlign(LEFT, BOTTOM);
+    textSize(10);
+    text(txt, left, y);
+    stroke(55);
+    strokeWeight(1);
+    line(left + textWidth(txt) + 5, y - 4, right, y - 4);
+    popStyle();
   }
 
   TimingBar activeBar() {
@@ -379,15 +391,6 @@ class UI {
 
     if (recordMode()) drawRecordPanel();
 
-    if (!recordMode()) {
-      resetGameBtn.label = "Ny match";
-      resetGameBtn.enabled = appMode != AppMode.RECORD;
-      resetGameBtn.draw();
-      startPlayerBtn.label = game.startingTeam == TEAM_RED ? "Start: Rod" : "Start: Gul";
-      startPlayerBtn.enabled = appMode != AppMode.RECORD;
-      startPlayerBtn.draw();
-    }
-
     if (appMode == AppMode.TEST) {
       shootBtn.label   = aiTestSimulating ? "..." : "Nasta test";
       shootBtn.enabled = controlsEnabled && !aiTestSimulating;
@@ -410,21 +413,26 @@ class UI {
     if (recordMode()) {
       boolean recReady = controlsEnabled && recordSession != null
                       && recordSession.canSave();
-      expertNextBtn.enabled = recReady;
-      expertNewBtn.enabled  = recReady;
-      expertExitBtn.enabled = controlsEnabled;
-      expertNextBtn.draw();
-      expertNewBtn.draw();
-      expertExitBtn.draw();
       return;
     }
 
-    datasetBtn.label   = "Expert dataset";
-    datasetBtn.enabled = controlsEnabled && appMode != AppMode.TRAINING
-                      && appMode != AppMode.TEST;
-    datasetBtn.draw();
 
-    trainBtn.label   = trainingActive ? "Avbryt" : "Trana";
+    resetGameBtn.label = "Ny match";
+    resetGameBtn.enabled = appMode != AppMode.RECORD;
+    resetGameBtn.draw();
+    startPlayerBtn.label = game.startingTeam == TEAM_RED ? "Start: Rod" : "Start: Gul";
+    startPlayerBtn.enabled = appMode != AppMode.RECORD;
+    startPlayerBtn.draw();
+
+    RndSampBtn.enabled  = controlsEnabled && appMode == AppMode.PLAY;
+    RndSampBtn.selected = (activeAiType == 1);
+    RndSampBtn.draw();
+    NNBtn.enabled  = controlsEnabled && appMode == AppMode.PLAY;
+    NNBtn.selected = (activeAiType == 2);
+    NNBtn.draw();
+
+    sectionLabel("TRÄNING (ENDAST NN)", TRAIN_BAR_Y - 24);
+    trainBtn.label   = trainingActive ? "Avbryt" : "Träna";
     trainBtn.enabled = appMode != AppMode.TEST
                       && (trainingActive || controlsEnabled);
     trainBtn.draw();
@@ -437,19 +445,6 @@ class UI {
       testBtn.enabled = controlsEnabled;
     }
     testBtn.draw();
-
-    resetModelBtn.label   = "Ny modell";
-    resetModelBtn.enabled = controlsEnabled && appMode != AppMode.TEST;
-    resetModelBtn.draw();
-
-    saveModelBtn.enabled = controlsEnabled && appMode != AppMode.TEST
-                        && appMode != AppMode.TRAINING;
-    loadModelBtn.enabled = saveModelBtn.enabled;
-    saveModelBtn.draw();
-    loadModelBtn.draw();
-
-    rndStateBtn.enabled = controlsEnabled && appMode == AppMode.PLAY;
-    rndStateBtn.draw();
   }
 
   void drawAiPanel() {
@@ -459,11 +454,6 @@ class UI {
     float barX  = left;
 
     pushStyle();
-    textAlign(LEFT, TOP);
-    fill(150);
-    textSize(10);
-    text("AI  (gradient ensemble)", left, TRAIN_BAR_Y - 14);
-
     noStroke();
     fill(50);
     rect(barX, TRAIN_BAR_Y, barW, TRAIN_BAR_H, 3);
@@ -474,10 +464,10 @@ class UI {
     fill(220);
     ellipse(hx, TRAIN_BAR_Y + TRAIN_BAR_H * 0.5, 12, 12);
 
-    textAlign(RIGHT, TOP);
-    fill(180);
-    textSize(9);
-    text(formatTrainCount(trainComparisons) + " steg", right, TRAIN_BAR_Y - 14);
+    textAlign(RIGHT, BOTTOM);
+    fill(150);
+    textSize(10);
+    text(formatTrainCount(trainComparisons) + " steg", right, TRAIN_BAR_Y - 24);
 
     fill(185);
     textAlign(LEFT, TOP);
@@ -651,14 +641,7 @@ class UI {
   }
 
   void toggleStartingPlayer() {
-    if (trainingActive) {
-      trainingActive = false;
-      trainingPreview.reset();
-    }
-    if (appMode == AppMode.TEST) stopAiTest();
-    if (appMode == AppMode.RECORD) stopRecordMode();
-    appMode = AppMode.PLAY;
-    game.toggleStartingTeam();
+    game.changeStartingTeam();
   }
 
   void setRndStones() {
@@ -670,9 +653,6 @@ class UI {
 
   void onMousePressed(float mx, float my) {
     if (recordMode()) {
-      if (expertExitBtn.enabled && expertExitBtn.hits(mx, my)) { stopRecordMode(); return; }
-      if (expertNextBtn.enabled && expertNextBtn.hits(mx, my)) { recordNextShot(); return; }
-      if (expertNewBtn.enabled  && expertNewBtn.hits(mx, my))  { recordNewState(); return; }
       if (shootBtn.enabled      && shootBtn.hits(mx, my))      { triggerAction();  return; }
       activeSlider = null;
       if      (curlSlider .trackHit(mx, my)) activeSlider = curlSlider;
@@ -688,10 +668,6 @@ class UI {
     if (trainBtn.enabled      && trainBtn.hits(mx, my))      {
       if (trainingActive) cancelTraining(); else startTraining(trainComparisons); return;
     }
-    if (resetModelBtn.enabled && resetModelBtn.hits(mx, my)) { resetTrainingModel(); return; }
-    if (saveModelBtn.enabled  && saveModelBtn.hits(mx, my))  { promptSaveModel();    return; }
-    if (loadModelBtn.enabled  && loadModelBtn.hits(mx, my))  { promptLoadModel();    return; }
-
     if (testBtn.enabled && testBtn.hits(mx, my)) {
       if (appMode == AppMode.TEST) stopAiTest(); else startAiTest(); return;
     }
@@ -702,7 +678,8 @@ class UI {
     }
     if (shootBtn.enabled && shootBtn.hits(mx, my)) { triggerAction(); return; }
     if (rndStateBtn.enabled && rndStateBtn.hits(mx, my)) { setRndStones(); return; }
-    if (datasetBtn.enabled  && datasetBtn.hits(mx, my))  { startRecordMode(); return; }
+    if (RndSampBtn.enabled && RndSampBtn.hits(mx, my)) { activeAiType = 1; return; }
+    if (NNBtn.enabled      && NNBtn.hits(mx, my))      { activeAiType = 2; return; }
 
     activeSlider = null;
     if (appMode == AppMode.TRAINING || appMode == AppMode.TEST) return;
@@ -729,13 +706,8 @@ class UI {
     startPlayerBtn.hover = startPlayerBtn.hits(mx, my);
     trainBtn.hover      = trainBtn.hits(mx, my);
     testBtn.hover       = testBtn.hits(mx, my);
-    resetModelBtn.hover = resetModelBtn.hits(mx, my);
-    saveModelBtn.hover  = saveModelBtn.hits(mx, my);
-    loadModelBtn.hover  = loadModelBtn.hits(mx, my);
-    datasetBtn.hover    = datasetBtn.hits(mx, my);
     rndStateBtn.hover   = rndStateBtn.hits(mx, my);
-    expertNextBtn.hover = expertNextBtn.hits(mx, my);
-    expertNewBtn.hover  = expertNewBtn.hits(mx, my);
-    expertExitBtn.hover = expertExitBtn.hits(mx, my);
+    RndSampBtn.hover    = RndSampBtn.hits(mx, my);
+    NNBtn.hover         = NNBtn.hits(mx, my);
   }
 }

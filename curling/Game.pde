@@ -56,6 +56,10 @@ class Game {
     reset();
   }
 
+  void changeStartingTeam() {
+    startingTeam = (startingTeam == TEAM_RED) ? TEAM_YELLOW : TEAM_RED;
+  }
+
   int teamForThrowIndex(int throwIndex) {
     if (throwIndex % 2 == 0) return startingTeam;
     return startingTeam == TEAM_RED ? TEAM_YELLOW : TEAM_RED;

@@ -80,6 +80,9 @@ int  trainingDone   = 0;
 boolean trainingActive = false;
 String trainingStatus = "";
 
+// Active AI type for Yellow: 1 = MC AI (random sampling), 2 = NN (neural network)
+int activeAiType = 2;
+
 int testGamesPlayed = 0;
 int testHumanWins     = 0;
 int testAiWins        = 0;
@@ -479,6 +482,51 @@ void keyPressed() {
   }
 }
 
+ArrayList<Stone> copyLayout(ArrayList<Stone> layout) {
+  ArrayList<Stone> copy = new ArrayList<Stone>();
+  for (Stone s : layout) {
+    Stone c = new Stone(s.pos.x, s.pos.y, s.team);
+    c.hogPassed = s.hogPassed;
+    copy.add(c);
+  }
+  return copy;
+}
+
+Shot mcBestShot(ArrayList<Stone> layout, int stonesLeft, int lastTeam) {
+  int N = 80;
+  Shot best = null;
+  float bestScore = Float.NEGATIVE_INFINITY;
+  ScoreResult before = house.scoreEnd(layout);
+
+  for (int i = 0; i < N; i++) {
+    float curl  = random(-1, 1);
+    float speed = random(0.35, 0.95) * UI.SPEED_MAX;
+    float angle = random(radians(-12), radians(12));
+
+    ArrayList<Stone> simStones = copyLayout(layout);
+    PVector h = sheet.hackWorld();
+    Stone fired = new Stone(h.x, h.y, TEAM_YELLOW);
+    fired.curl = constrain(curl, -1, 1);
+    fired.vel.set(sin(angle) * speed, cos(angle) * speed);
+    simStones.add(fired);
+
+    for (int step = 0; step < 100000; step++) {
+      physics.step(simStones, DT);
+      boolean anyMoving = false;
+      for (Stone s : simStones) if (s.isMoving()) { anyMoving = true; break; }
+      if (!anyMoving) break;
+    }
+
+    ScoreResult after = house.scoreEnd(simStones);
+    float score = after.diffFrom(before);
+    if (score > bestScore) {
+      bestScore = score;
+      best = new Shot(curl, speed, angle);
+    }
+  }
+  return best != null ? best : new Shot(0, 0.6 * UI.SPEED_MAX, 0);
+}
+
 void maybeAiShoot() {
   if (appMode != AppMode.PLAY) return;
   if (game.state != GameState.AIMING || game.currentTeam != TEAM_YELLOW) return;
@@ -488,8 +536,13 @@ void maybeAiShoot() {
     lastTeam = game.stones.get(game.stones.size() - 1).team;
   }
 
-  Shot shot = bestShotActive(game.stones, game.stonesRemaining(TEAM_YELLOW),
-                             lastTeam, true, true);
+  Shot shot;
+  if (activeAiType == 1) {
+    shot = mcBestShot(game.stones, game.stonesRemaining(TEAM_YELLOW), lastTeam);
+  } else {
+    shot = bestShotActive(game.stones, game.stonesRemaining(TEAM_YELLOW),
+                          lastTeam, true, true);
+  }
   game.fire(shot);
 }
 

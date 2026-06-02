@@ -345,19 +345,6 @@ class UI {
     lockPhase = PHASE_ANGLE;
   }
 
-  void onRecordEnter() { onTurnStart(); }
-  void onRecordExit()  { onTurnStart(); }
-
-  void setSlidersFromShot(Shot shot) {
-    curlSlider.value  = constrain(shot.curl, curlSlider.minV, curlSlider.maxV);
-    speedSlider.value = constrain(shot.speed / SPEED_MAX,
-                                  speedSlider.minV, speedSlider.maxV);
-    angleSlider.value = constrain(degrees(shot.angle),
-                                  angleSlider.minV, angleSlider.maxV);
-  }
-
-  boolean recordMode() { return appMode == AppMode.RECORD; }
-
   final static float SPEED_MAX = 40.0;
 
   Shot intendedShot() {
@@ -382,14 +369,11 @@ class UI {
     drawAiPanel();
 
     boolean controlsEnabled = appMode != AppMode.TRAINING;
-    boolean showLockBars    = controlsEnabled && !recordMode();
     curlSlider.draw();
     speedSlider.draw();
     angleSlider.draw();
 
-    if (showLockBars) activeBar().draw();
-
-    if (recordMode()) drawRecordPanel();
+    if (controlsEnabled) activeBar().draw();
 
     if (appMode == AppMode.TEST) {
       shootBtn.label   = aiTestSimulating ? "..." : "Nasta test";
@@ -397,10 +381,6 @@ class UI {
     } else if (game.state == GameState.ENDED) {
       shootBtn.label   = "Ny match";
       shootBtn.enabled = controlsEnabled;
-    } else if (recordMode()) {
-      shootBtn.label   = "Skjut";
-      shootBtn.enabled = controlsEnabled
-                      && recordSession != null && recordSession.canShoot();
     } else if (game.state == GameState.AIMING) {
       shootBtn.label   = (lockPhase == PHASE_ANGLE) ? "L\u00e5s vinkel" : "L\u00e5s fart";
       shootBtn.enabled = controlsEnabled && game.currentTeam == TEAM_RED;
@@ -410,18 +390,11 @@ class UI {
     }
     shootBtn.draw();
 
-    if (recordMode()) {
-      boolean recReady = controlsEnabled && recordSession != null
-                      && recordSession.canSave();
-      return;
-    }
-
-
-    resetGameBtn.label = "Ny match";
-    resetGameBtn.enabled = appMode != AppMode.RECORD;
+    resetGameBtn.label   = "Ny match";
+    resetGameBtn.enabled = appMode != AppMode.TRAINING;
     resetGameBtn.draw();
-    startPlayerBtn.label = game.startingTeam == TEAM_RED ? "Start: Rod" : "Start: Gul";
-    startPlayerBtn.enabled = appMode != AppMode.RECORD;
+    startPlayerBtn.label   = game.startingTeam == TEAM_RED ? "Start: Rod" : "Start: Gul";
+    startPlayerBtn.enabled = true;
     startPlayerBtn.draw();
 
     RndSampBtn.enabled  = controlsEnabled && appMode == AppMode.PLAY;
@@ -486,9 +459,6 @@ class UI {
     } else if (appMode == AppMode.TEST) {
       text("Test: Rod " + testHumanWins + "  Gul " + testAiWins
            + "  (" + testGamesPlayed + " sim)", left, AI_STATUS_Y + 14);
-    } else if (appMode == AppMode.RECORD) {
-      int n = expertShots != null ? expertShots.count() : 0;
-      text("Dataset: " + n + " rader", left, AI_STATUS_Y + 14);
     } else {
       text(trainingDone + " steg klara", left, AI_STATUS_Y + 14);
     }
@@ -531,7 +501,7 @@ class UI {
     textAlign(LEFT, TOP);
     fill(235);
     textSize(15);
-    text(recordMode() ? "Expert-skott" : "Skott", left, STATS_TOP);
+    text("Skott", left, STATS_TOP);
 
     fill(170);
     textSize(11);
@@ -539,18 +509,10 @@ class UI {
     text("Status", left, STATS_TOP + 44);
 
     textAlign(RIGHT, TOP);
-    if (recordMode()) {
-      fill(color(230, 210, 80));
-      text("GUL", right, STATS_TOP + 26);
-      fill(220);
-      text(recordSession != null && recordSession.simulating
-           ? "SIMULERAR" : "AIMING", right, STATS_TOP + 44);
-    } else {
-      fill(game.currentTeam == TEAM_RED ? color(230, 80, 80) : color(230, 210, 80));
-      text(game.teamLabel(game.currentTeam), right, STATS_TOP + 26);
-      fill(220);
-      text(game.stateLabel(), right, STATS_TOP + 44);
-    }
+    fill(game.currentTeam == TEAM_RED ? color(230, 80, 80) : color(230, 210, 80));
+    text(game.teamLabel(game.currentTeam), right, STATS_TOP + 26);
+    fill(220);
+    text(game.stateLabel(), right, STATS_TOP + 44);
 
     drawTeamRow(left, STATS_TOP + 64, TEAM_RED);
     drawTeamRow(left, STATS_TOP + 82, TEAM_YELLOW);
@@ -563,9 +525,7 @@ class UI {
 
   void drawTeamRow(float xLeft, float y, int team) {
     color teamColor = team == TEAM_RED ? color(230, 80, 80) : color(230, 210, 80);
-    int   remaining = recordMode()
-      ? (team == TEAM_YELLOW ? 1 : 0)
-      : game.stonesRemaining(team);
+    int   remaining = game.stonesRemaining(team);
 
     pushStyle();
     textAlign(LEFT, CENTER);
@@ -592,25 +552,8 @@ class UI {
     popStyle();
   }
 
-  void drawRecordPanel() {
-    float left = ICE_W + 16;
-    pushStyle();
-    textAlign(LEFT, TOP);
-    fill(200);
-    textSize(10);
-    text("Dra stenar pa isen for att andra layout", left, BAR_Y - 28);
-    text("Nasta / Ny state = ny layout + AI-forslag", left, BAR_Y - 16);
-    popStyle();
-  }
-
   void triggerAction() {
     if (appMode == AppMode.TRAINING) return;
-    if (recordMode()) {
-      if (recordSession != null && recordSession.canShoot()) {
-        recordSession.shoot(intendedShot());
-      }
-      return;
-    }
     if (appMode == AppMode.TEST) {
       if (!aiTestSimulating) runAiTestSim();
       return;
@@ -635,7 +578,6 @@ class UI {
       trainingPreview.reset();
     }
     if (appMode == AppMode.TEST) stopAiTest();
-    if (appMode == AppMode.RECORD) stopRecordMode();
     appMode = AppMode.PLAY;
     game.reset();
   }
@@ -652,16 +594,6 @@ class UI {
   }
 
   void onMousePressed(float mx, float my) {
-    if (recordMode()) {
-      if (shootBtn.enabled      && shootBtn.hits(mx, my))      { triggerAction();  return; }
-      activeSlider = null;
-      if      (curlSlider .trackHit(mx, my)) activeSlider = curlSlider;
-      else if (speedSlider.trackHit(mx, my)) activeSlider = speedSlider;
-      else if (angleSlider.trackHit(mx, my)) activeSlider = angleSlider;
-      if (activeSlider != null) { activeSlider.dragging = true; activeSlider.setFromMouseY(my); }
-      return;
-    }
-
     if (resetGameBtn.enabled && resetGameBtn.hits(mx, my)) { resetGameNow(); return; }
     if (startPlayerBtn.enabled && startPlayerBtn.hits(mx, my)) { toggleStartingPlayer(); return; }
 
@@ -671,7 +603,7 @@ class UI {
     if (testBtn.enabled && testBtn.hits(mx, my)) {
       if (appMode == AppMode.TEST) stopAiTest(); else startAiTest(); return;
     }
-    if (trainBarHit(mx, my) && appMode != AppMode.TRAINING && appMode != AppMode.RECORD) {
+    if (trainBarHit(mx, my) && appMode != AppMode.TRAINING) {
       draggingTrainBar = true;
       setTrainComparisonsFromMouse(mx);
       return;

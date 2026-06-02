@@ -46,9 +46,9 @@ class PolicyGradientTraining {
     void reset() {
         if (policy != null) {
             policy = new NeuralPolicy(policy.minCurl, policy.maxCurl,
-                                      policy.minSpeed, policy.maxSpeed,
-                                      policy.minAngleDeg, policy.maxAngleDeg,
-                                      policy.meanAndStd);
+                                    policy.minSpeed, policy.maxSpeed,
+                                    policy.minAngleDeg, policy.maxAngleDeg,
+                                    policy.meanAndStd);
         } else {
             policy = new NeuralPolicy(true);
         }
@@ -81,7 +81,7 @@ class PolicyGradientTraining {
         float[] state = policy.convertState(stones, stonesLeft, TEAM_RED);
 
         // 2. Single forward pass.
-        float[] hidden  = policy.hiddenLayer.feedForward(state);
+        float[] hidden  = policy.feedForwardHidden(state);
         float[] means   = policy.outputLayer.feedForward(hidden);
         float[] logStds = policy.outputLogStd.feedForward(hidden);
 

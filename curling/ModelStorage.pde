@@ -1,7 +1,7 @@
 // Save / load trained NeuralPolicy weights + ShotTypeSelector.
 // File format: text .curlmodel with header + @policy blocks + @selector block.
 class ModelStorage {
-    static final String FORMAT_VERSION = "curling_model_v2";
+    static final String FORMAT_VERSION = "curling_model_v3";
     static final String DEFAULT_DIR    = "data/models";
 
     String lastMessage = "";

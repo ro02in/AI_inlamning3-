@@ -26,45 +26,7 @@ abstract class Heuristic {
         return weight * (raw / scale);
     }
 
-    ShotResult simulate(NeuralPolicy policy, float[] state, ArrayList<Stone> layout) {
-        return simulate(policy, state, layout, null);
-    }
-
-    ShotResult simulate(NeuralPolicy policy, float[] state, ArrayList<Stone> layout,
-                        ExplorationNoise noise) {
-        ArrayList<Stone> before = copyLayout(layout);
-        ArrayList<Stone> simStones = copyLayout(layout);
-        ScoreResult scoreBefore = house.scoreEnd(simStones);
-        Shot shot = policy.predict(state);
-        if (noise != null) shot = noise.perturb(shot, policy);
-
-        PVector h = sheet.hackWorld();
-        Stone fired = new Stone(h.x, h.y, TEAM_YELLOW);
-        fired.curl = constrain(shot.curl, -1, 1);
-        fired.vel.set(sin(shot.angle) * shot.speed, cos(shot.angle) * shot.speed);
-        simStones.add(fired);
-
-        for (int step = 0; step < 100000; step++) {
-            physics.step(simStones, DT);
-            boolean anyMoving = false;
-            for (Stone s : simStones) if (s.isMoving()) { anyMoving = true; break; }
-            if (!anyMoving) break;
-        }
-
-        return new ShotResult(simStones, before, fired, scoreBefore, shot);
-    }
-
     abstract float scoreResult(ShotResult result);
-
-    ArrayList<Stone> copyLayout(ArrayList<Stone> layout) {
-        ArrayList<Stone> copy = new ArrayList<Stone>();
-        for (Stone s : layout) {
-            Stone c = new Stone(s.pos.x, s.pos.y, s.team);
-            c.hogPassed = s.hogPassed;
-            copy.add(c);
-        }
-        return copy;
-    }
 }
 
 // ---- Draw heuristic: score improvement only ----
@@ -311,65 +273,6 @@ class FreezeHeuristic extends Heuristic {
         float scoreBonus = constrain(scoreDelta / 3.0, -0.3, 0.3);
 
         return proximityScore * 1.5 + scoreBonus;
-    }
-}
-
-// ---- Legacy heuristics kept for compatibility ----
-
-class ScoreHeuristic extends Heuristic {
-    ScoreHeuristic() { this.scale = 3.0; this.weight = 2.5; }
-    @Override
-    float scoreResult(ShotResult result) {
-        ScoreResult after = house.scoreEnd(result.stonesAfter);
-        return after.diffFrom(result.scoreBefore);
-    }
-}
-
-class CloseToButtonHeuristic extends Heuristic {
-    CloseToButtonHeuristic() { this.scale = 50.0; this.weight = 0.8; }
-    @Override
-    float scoreResult(ShotResult result) {
-        Stone fired = result.fired;
-        float fitness = 0;
-        float d = house.distanceToButton(fired);
-        fitness -= d;
-        if (d < sheet.BUTTON_R_FT) fitness += 20;
-        return fitness;
-    }
-}
-
-class PenaltyHeuristic extends Heuristic {
-    PenaltyHeuristic() { this.scale = 50.0; this.weight = 1.2; }
-    @Override
-    float scoreResult(ShotResult result) {
-        Stone fired = result.fired;
-        float fitness = 0;
-        if (fired.pos.x < 0 || fired.pos.x > sheet.SHEET_WIDTH_FT) fitness -= 100;
-        if (fired.pos.y + fired.radius < sheet.hogY
-            || fired.pos.y + fired.radius > sheet.backFarY) fitness -= 100;
-        return fitness;
-    }
-}
-
-class ExpertShotHeuristic extends Heuristic {
-    Shot targetShot;
-    final float defaultAngleSpanRad = radians(20f);
-
-    ExpertShotHeuristic() { this.weight = 5.0; this.scale = 1.0; }
-
-    void setTarget(Shot target) { targetShot = target; }
-
-    float matchScore(Shot predicted) {
-        if (targetShot == null || predicted == null) return 0;
-        float curlErr  = abs(predicted.curl - targetShot.curl);
-        float speedErr = abs(predicted.speed - targetShot.speed) / UI.SPEED_MAX;
-        float angleErr = abs(predicted.angle - targetShot.angle) / defaultAngleSpanRad;
-        return -(curlErr + speedErr + angleErr);
-    }
-
-    @Override
-    float scoreResult(ShotResult result) {
-        return matchScore(result.plannedShot);
     }
 }
 

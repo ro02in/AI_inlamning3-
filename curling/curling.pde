@@ -38,7 +38,7 @@ final float DT = 1.0 / 60.0;
 boolean DEBUG = false;
 
 // ----- AI training / test ------------------------------------
-enum AppMode { PLAY, TRAINING, TEST, RECORD }
+enum AppMode { PLAY, TRAINING, TEST }
 
 AppMode appMode = AppMode.PLAY;
 
@@ -65,15 +65,6 @@ SelfPlayRollout  selfPlayRollout;
 TrainingPreview    trainingPreview;
 PolicyDiagnostics  policyDiagnostics;
 ModelStorage       modelStorage;
-
-// Legacy trainers kept for save/load compatibility but not actively used in training.
-ExpertEnsemble       ensemble;
-PolicySearchTraining singleTrainer;
-PolicyGradientTraining pgTrainer;
-ExpertShotHeuristic    expertHeuristic;
-ExpertShotDataset      expertShots;
-RecordSession          recordSession;
-String                 recordStatus = "";
 
 int  trainingTarget = 100;
 int  trainingDone   = 0;
@@ -120,15 +111,9 @@ void setup() {
   policyDiagnostics = new PolicyDiagnostics();
   modelStorage      = new ModelStorage();
 
-  // Legacy (kept for record mode / save compatibility)
-  ensemble        = new ExpertEnsemble();
-  singleTrainer   = new PolicySearchTraining();
-  pgTrainer       = new PolicyGradientTraining();
-  expertHeuristic = new ExpertShotHeuristic();
-  expertShots     = new ExpertShotDataset();
 }
 
-// Representative policy for record-mode slider preview.
+// Representative policy for training preview.
 NeuralPolicy activePolicy() {
   return gradientEnsemble.anyPolicy();
 }
@@ -153,43 +138,6 @@ void resetActiveTrainer() {
   trainingStatus = "Ny modell";
 }
 
-void applyRecordPolicySliders() {
-  if (recordSession == null) return;
-  NeuralPolicy p = activePolicy();
-  float[] state = p.convertState(recordSession.layoutSnapshot, 1, TEAM_RED);
-  ui.setSlidersFromShot(p.predict(state));
-}
-
-void recordNextShot() {
-  if (recordSession == null || !recordSession.canSave()) return;
-  recordSession.saveCurrentShot(ui.intendedShot());
-  applyRecordPolicySliders();
-}
-
-void recordNewState() {
-  if (recordSession == null) return;
-  recordSession.newRandomLayout();
-  applyRecordPolicySliders();
-}
-
-void startRecordMode() {
-  if (trainingActive) return;
-  if (appMode == AppMode.TEST) stopAiTest();
-  appMode = AppMode.RECORD;
-  recordSession = new RecordSession(expertShots);
-  recordStatus = "Expert-lage";
-  ui.onRecordEnter();
-  applyRecordPolicySliders();
-}
-
-void stopRecordMode() {
-  if (appMode != AppMode.RECORD) return;
-  appMode = AppMode.PLAY;
-  recordSession = null;
-  recordStatus = "";
-  ui.onRecordExit();
-}
-
 void draw() {
   background(20);
 
@@ -211,9 +159,6 @@ void draw() {
   } else if (appMode == AppMode.TEST) {
     updateAiTest();
     ui.update(DT);
-  } else if (appMode == AppMode.RECORD) {
-    recordSession.update(DT);
-    ui.update(DT);
   } else {
     physics.step(game.stones, DT);
     game.update();
@@ -228,13 +173,6 @@ void draw() {
     drawAiTestOverlay();
   } else if (appMode == AppMode.TRAINING) {
     trainingPreview.drawStones();
-  } else if (appMode == AppMode.RECORD) {
-    if (recordSession != null) {
-      drawAimPreview(ui.intendedShot());
-      for (Stone s : recordSession.stones) s.draw();
-      drawRecordDragHighlight();
-      drawRecordOverlay();
-    }
   } else {
     if (game.state == GameState.AIMING && game.currentTeam == TEAM_RED) {
       drawAimPreview(ui.intendedShot());
@@ -357,42 +295,6 @@ void updateAiTest() {
   }
 }
 
-void drawRecordDragHighlight() {
-  if (recordSession == null || recordSession.dragIndex < 0) return;
-  Stone s = recordSession.layoutSnapshot.get(recordSession.dragIndex);
-  PVector sc = worldToScreen(s.pos);
-  float d = worldToScreen(STONE_RADIUS * 2.4f);
-  pushStyle();
-  noFill();
-  stroke(255, 220, 80, 230);
-  strokeWeight(3);
-  ellipse(sc.x, sc.y, d, d);
-  popStyle();
-}
-
-void drawRecordOverlay() {
-  pushStyle();
-  fill(0, 160);
-  noStroke();
-  rect(0, 8, ICE_W, 52);
-  fill(240);
-  textAlign(LEFT, TOP);
-  textSize(13);
-  text("Expert — dra stenar, Gul skjuter", 12, 14);
-  fill(200);
-  textSize(11);
-  String msg = recordSession != null ? recordSession.status : "";
-  if (recordStatus.length() > 0) msg = recordStatus + "  |  " + msg;
-  text(msg, 12, 32);
-  if (expertShots != null) {
-    textAlign(RIGHT, TOP);
-    fill(180);
-    text(expertShots.count() + " sparade i " + expertShots.csvPath,
-         ICE_W - 12, 14);
-  }
-  popStyle();
-}
-
 void drawAiTestOverlay() {
   pushStyle();
   if (aiTestSimulating) {
@@ -436,39 +338,15 @@ void drawAiTestOverlay() {
 
 // ----- Mouse / keyboard input --------------------------------
 void mousePressed() {
-  if (handleRecordMousePressed(mouseX, mouseY)) return;
   ui.onMousePressed(mouseX, mouseY);
 }
 
 void mouseDragged() {
-  if (handleRecordMouseDragged(mouseX, mouseY)) return;
   ui.onMouseDragged(mouseX, mouseY);
 }
 
 void mouseReleased() {
-  if (handleRecordMouseReleased()) return;
   ui.onMouseReleased(mouseX, mouseY);
-}
-
-boolean handleRecordMousePressed(float mx, float my) {
-  if (appMode != AppMode.RECORD || recordSession == null) return false;
-  if (mx >= ICE_W) return false;
-  if (recordSession.onMousePressed(mx, my)) return true;
-  return false;
-}
-
-boolean handleRecordMouseDragged(float mx, float my) {
-  if (appMode != AppMode.RECORD || recordSession == null) return false;
-  return recordSession.onMouseDragged(mx, my);
-}
-
-boolean handleRecordMouseReleased() {
-  if (appMode != AppMode.RECORD || recordSession == null) return false;
-  if (recordSession.onMouseReleased()) {
-    applyRecordPolicySliders();
-    return true;
-  }
-  return false;
 }
 void mouseMoved()    { ui.onMouseMoved(mouseX, mouseY); }
 
@@ -548,7 +426,7 @@ void maybeAiShoot() {
 
 // ----- Aim preview: forward-simulated trajectory in team color
 void drawAimPreview(Shot shot) {
-  int team = (appMode == AppMode.RECORD) ? TEAM_YELLOW : game.currentTeam;
+  int team = game.currentTeam;
   color teamColor = (team == TEAM_RED)
       ? color(235, 70, 70)
       : color(235, 205, 60);

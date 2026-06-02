@@ -1,6 +1,6 @@
 // Activation function choice for a Neuron / NeuronLayer.
 // - TANH:   bounded [-1, 1], smooth, can saturate at the edges.
-// - RELU:   leaky ReLU (see RELU_LEAK). Small negative slope keeps units recoverable under mutation.
+// - RELU:   leaky ReLU (see RELU_LEAK). Small negative slope keeps units recoverable.
 // - LINEAR: identity. Used when an output should not be squashed.
 enum ActivationKind { TANH, RELU, LINEAR }
 enum NormKind { NONE, LAYERNORM }
@@ -67,33 +67,11 @@ class Neuron {
         }
     }
 
-    void mutate(float mutationRate, float mutationStrength) {
-        for (int i = 0; i < weights.length; i++) {
-            if (random(1) < mutationRate) {
-                weights[i] += randomGaussian() * mutationStrength;
-            }
-        }
-
-        if (random(1) < mutationRate) {
-            bias += randomGaussian() * mutationStrength;
-        }
-        clip();
-    }
-
     void clip() {
         for (int i = 0; i < weights.length; i++) {
             weights[i] = constrain(weights[i], -WEIGHT_CLIP, WEIGHT_CLIP);
         }
         bias = constrain(bias, -WEIGHT_CLIP, WEIGHT_CLIP);
-    }
-
-    Neuron copy() {
-        Neuron clone = new Neuron(weights.length, activation);
-        for (int i = 0; i < weights.length; i++) {
-            clone.weights[i] = weights[i];
-        }
-        clone.bias = bias;
-        return clone;
     }
 
     void appendSaveLine(StringBuilder sb) {

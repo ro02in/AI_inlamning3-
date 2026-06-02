@@ -181,27 +181,10 @@ class NeuronLayer {
         return gradInput;
     }
 
-    void mutate(float mutationRate, float mutationStrength) {
-        for (Neuron neuron : neurons) {
-            neuron.mutate(mutationRate, mutationStrength);
-        }
-    }
-
     void clipAll() {
         for (Neuron neuron : neurons) {
             neuron.clip();
         }
-    }
-
-    NeuronLayer copy() {
-        NeuronLayer clone = new NeuronLayer(neurons.length,
-                                            neurons[0].weights.length,
-                                            neurons[0].activation,
-                                            normKind);
-        for (int i = 0; i < neurons.length; i++) {
-            clone.neurons[i] = neurons[i].copy();
-        }
-        return clone;
     }
 
     String activationName(ActivationKind kind) {
@@ -270,34 +253,4 @@ class NeuronLayer {
         return idx;
     }
 
-    // Parse @layer line at lines[idx] and following neuron lines. Returns index after layer.
-    int loadFromLines(String[] lines, int idx, NeuralPolicy policy,
-                      String expectedTag) {
-        if (idx >= lines.length) return idx;
-        String header = trim(lines[idx]);
-        if (!header.startsWith("@layer ")) return idx;
-
-        String[] parts = split(header, ' ');
-        if (parts.length < 5) return idx + 1;
-        String tag = parts[1];
-        if (!tag.equals(expectedTag)) return idx + 1;
-
-        ActivationKind act = parseActivation(parts[2]);
-        int neuronCount = parseInt(parts[3]);
-        int inputCount  = parseInt(parts[4]);
-        NormKind norm = parts.length >= 6 ? parseNorm(parts[5]) : NormKind.NONE;
-
-        NeuronLayer layer = new NeuronLayer(neuronCount, inputCount, act, norm);
-        idx++;
-        Neuron parser = new Neuron(inputCount, act);
-        for (int i = 0; i < neuronCount && idx < lines.length; i++, idx++) {
-            Neuron n = parser.createFromLine(lines[idx]);
-            if (n != null) layer.neurons[i] = n;
-        }
-
-        if (expectedTag.equals("hidden"))  policy.hiddenLayer = layer;
-        else if (expectedTag.equals("output")) policy.outputLayer = layer;
-        else if (expectedTag.equals("logstd")) policy.outputLogStd = layer;
-        return idx;
-    }
 }

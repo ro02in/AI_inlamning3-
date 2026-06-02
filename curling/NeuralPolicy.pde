@@ -1,6 +1,7 @@
 class NeuralPolicy {
     int inputSize = TOTAL_STONES * 4 + 2;
     int hiddenSize = 16;
+    int defaultHiddenLayerCount = 3;
     int outputSize = 3;
 
     final ActivationKind HIDDEN_ACTIVATION = ActivationKind.RELU;
@@ -71,7 +72,7 @@ class NeuralPolicy {
         return logStd >= logStdMax(dim) - 1e-4f;
     }
 
-    NeuronLayer hiddenLayer;
+    NeuronLayer[] hiddenLayers;
     NeuronLayer outputLayer;    // 3 neurons for deterministic policy or 3 mean neurons
     NeuronLayer outputLogStd;   // 3 neurons (LINEAR) for log σ — only used when meanAndStd=true
 
@@ -90,8 +91,7 @@ class NeuralPolicy {
         this.maxSpeed     = maxSpeed;
         this.minAngleDeg  = minAngleDeg;
         this.maxAngleDeg  = maxAngleDeg;
-        hiddenLayer = new NeuronLayer(hiddenSize, inputSize,
-                                      HIDDEN_ACTIVATION, NormKind.LAYERNORM);
+        initializeHiddenLayers(defaultHiddenLayerCount);
         outputLayer = new NeuronLayer(outputSize, hiddenSize, OUTPUT_ACTIVATION);
     }
 
@@ -115,8 +115,7 @@ class NeuralPolicy {
         this.minAngleDeg  = minAngleDeg;
         this.maxAngleDeg  = maxAngleDeg;
         this.meanAndStd   = meanAndStd;
-        hiddenLayer  = new NeuronLayer(hiddenSize, inputSize,
-                                       HIDDEN_ACTIVATION, NormKind.LAYERNORM);
+        initializeHiddenLayers(defaultHiddenLayerCount);
         outputLayer  = new NeuronLayer(outputSize, hiddenSize, OUTPUT_ACTIVATION);
         if (meanAndStd) {
             outputLogStd = new NeuronLayer(outputSize, hiddenSize, ActivationKind.LINEAR);
@@ -192,6 +191,38 @@ class NeuralPolicy {
 
     // ---- Forward pass helpers ----
 
+    void initializeHiddenLayers(int count) {
+        hiddenLayers = new NeuronLayer[max(1, count)];
+        int previousSize = inputSize;
+        for (int i = 0; i < hiddenLayers.length; i++) {
+            hiddenLayers[i] = new NeuronLayer(hiddenSize, previousSize,
+                                              HIDDEN_ACTIVATION, NormKind.LAYERNORM);
+            previousSize = hiddenSize;
+        }
+    }
+
+    float[] feedForwardHidden(float[] state) {
+        float[] values = state;
+        for (NeuronLayer layer : hiddenLayers) {
+            values = layer.feedForward(values);
+        }
+        return values;
+    }
+
+    NeuronLayer lastHiddenLayer() {
+        if (hiddenLayers == null || hiddenLayers.length == 0) return null;
+        return hiddenLayers[hiddenLayers.length - 1];
+    }
+
+    void appendLoadedHiddenLayer(NeuronLayer layer) {
+        if (layer == null) return;
+        int oldLength = hiddenLayers == null ? 0 : hiddenLayers.length;
+        NeuronLayer[] expanded = new NeuronLayer[oldLength + 1];
+        for (int i = 0; i < oldLength; i++) expanded[i] = hiddenLayers[i];
+        expanded[oldLength] = layer;
+        hiddenLayers = expanded;
+    }
+
     float mapTanhToRange(float tanhOut, float lo, float hi) {
         return lo + (tanhOut + 1f) * 0.5f * (hi - lo);
     }
@@ -206,7 +237,7 @@ class NeuralPolicy {
 
     // Deterministic prediction. For a meanAndStd policy this returns the mean shot.
     Shot predict(float[] state) {
-        float[] hiddenOutputs = hiddenLayer.feedForward(state);
+        float[] hiddenOutputs = feedForwardHidden(state);
         float[] outputValues  = outputLayer.feedForward(hiddenOutputs);
 
         float curl  = mapTanhToRange(outputValues[0], minCurl, maxCurl);
@@ -227,7 +258,7 @@ class NeuralPolicy {
     Shot sample(float[] state) {
         if (!meanAndStd) return predict(state);
 
-        float[] hidden  = hiddenLayer.feedForward(state);
+        float[] hidden  = feedForwardHidden(state);
         float[] means   = outputLayer.feedForward(hidden);
         float[] logStds = outputLogStd.feedForward(hidden);
 
@@ -280,12 +311,14 @@ class NeuralPolicy {
             gradHidden[i] = gradHiddenFromMean[i] + gradHiddenFromLogStd[i];
         }
 
-        // Backward through hidden layer (updates its weights; input gradient discarded).
-        hiddenLayer.backward(gradHidden, lr);
+        // Backward through hidden layers in reverse order (input gradient discarded).
+        for (int i = hiddenLayers.length - 1; i >= 0; i--) {
+            gradHidden = hiddenLayers[i].backward(gradHidden, lr);
+        }
     }
 
     void clipWeights() {
-        hiddenLayer.clipAll();
+        for (NeuronLayer layer : hiddenLayers) layer.clipAll();
         outputLayer.clipAll();
         if (meanAndStd && outputLogStd != null) {
             outputLogStd.clipAll();
@@ -328,7 +361,9 @@ class NeuralPolicy {
         if (updateCount >= 0) {
             sb.append("update_count=").append(updateCount).append('\n');
         }
-        hiddenLayer.appendSave(sb, "hidden");
+        for (int i = 0; i < hiddenLayers.length; i++) {
+            hiddenLayers[i].appendSave(sb, "hidden" + (i + 1));
+        }
         outputLayer.appendSave(sb, "output");
         if (meanAndStd && outputLogStd != null) {
             outputLogStd.appendSave(sb, "logstd");
@@ -384,17 +419,23 @@ class NeuralPolicy {
             outputLogStd = null;
         }
 
-        NeuronLayer layerLoader = new NeuronLayer(1, 1);
+        hiddenLayers = new NeuronLayer[0];
         while (idx < lines.length) {
             String line = trim(lines[idx]);
             if (line.equals("@end")) return idx + 1;
             if (line.startsWith("@policy ")) return idx;
             if (line.startsWith("@layer hidden")) {
-                idx = layerLoader.loadFromLines(lines, idx, this, "hidden");
+                NeuronLayer loaded = new NeuronLayer(1, 1);
+                idx = loaded.loadSelf(lines, idx);
+                appendLoadedHiddenLayer(loaded);
             } else if (line.startsWith("@layer output")) {
-                idx = layerLoader.loadFromLines(lines, idx, this, "output");
+                NeuronLayer loaded = new NeuronLayer(1, 1);
+                idx = loaded.loadSelf(lines, idx);
+                outputLayer = loaded;
             } else if (line.startsWith("@layer logstd")) {
-                idx = layerLoader.loadFromLines(lines, idx, this, "logstd");
+                NeuronLayer loaded = new NeuronLayer(1, 1);
+                idx = loaded.loadSelf(lines, idx);
+                outputLogStd = loaded;
             } else {
                 idx++;
             }

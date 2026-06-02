@@ -1,6 +1,6 @@
 // Shot-type selector network.
 //
-// A small 2-layer MLP: inputSize -> hidden (RELU) -> numTypes (LINEAR logits).
+// A small MLP: inputSize -> 3 hidden layers (RELU) -> numTypes (LINEAR logits).
 // Training: for a given board state, evaluate each expert's shot via FinalScoreHeuristic
 // (full self-play rollout if depth > 1). Compute reward-weighted softmax target and
 // add an entropy bonus to prevent locking onto one shot type.
@@ -11,8 +11,9 @@ class ShotTypeSelector {
     int numTypes;
     int inputSize;
     int hiddenSize = 12;
+    int defaultHiddenLayerCount = 3;
 
-    NeuronLayer hiddenLayer;
+    NeuronLayer[] hiddenLayers;
     NeuronLayer outputLayer;
 
     RandomState randomState = new RandomState();
@@ -29,15 +30,13 @@ class ShotTypeSelector {
         this.numTypes  = ensemble.count;
         // Input size matches the expert policies' input encoding.
         this.inputSize = TOTAL_STONES * 4 + 2;
-        hiddenLayer = new NeuronLayer(hiddenSize, inputSize,
-                                      ActivationKind.RELU, NormKind.LAYERNORM);
+        initializeHiddenLayers(defaultHiddenLayerCount);
         outputLayer = new NeuronLayer(numTypes,   hiddenSize, ActivationKind.LINEAR);
         initBaseline();
     }
 
     void reset() {
-        hiddenLayer = new NeuronLayer(hiddenSize, inputSize,
-                                      ActivationKind.RELU, NormKind.LAYERNORM);
+        initializeHiddenLayers(defaultHiddenLayerCount);
         outputLayer = new NeuronLayer(numTypes,   hiddenSize, ActivationKind.LINEAR);
         updateCount = 0;
         initBaseline();
@@ -45,9 +44,42 @@ class ShotTypeSelector {
 
     // Compute softmax probabilities for the given state.
     float[] probs(float[] state) {
-        float[] hidden  = hiddenLayer.feedForward(state);
+        float[] hidden  = feedForwardHidden(state);
         float[] logits  = outputLayer.feedForward(hidden);
         return softmax(logits);
+    }
+
+    void initializeHiddenLayers(int count) {
+        hiddenLayers = new NeuronLayer[max(1, count)];
+        int previousSize = inputSize;
+        for (int i = 0; i < hiddenLayers.length; i++) {
+            hiddenLayers[i] = new NeuronLayer(hiddenSize, previousSize,
+                                              ActivationKind.RELU, NormKind.LAYERNORM);
+            previousSize = hiddenSize;
+        }
+    }
+
+    float[] feedForwardHidden(float[] state) {
+        float[] values = state;
+        for (NeuronLayer layer : hiddenLayers) {
+            values = layer.feedForward(values);
+        }
+        return values;
+    }
+
+    void backwardHidden(float[] gradHidden, float lr) {
+        for (int i = hiddenLayers.length - 1; i >= 0; i--) {
+            gradHidden = hiddenLayers[i].backward(gradHidden, lr);
+        }
+    }
+
+    void appendLoadedHiddenLayer(NeuronLayer layer) {
+        if (layer == null) return;
+        int oldLength = hiddenLayers == null ? 0 : hiddenLayers.length;
+        NeuronLayer[] expanded = new NeuronLayer[oldLength + 1];
+        for (int i = 0; i < oldLength; i++) expanded[i] = hiddenLayers[i];
+        expanded[oldLength] = layer;
+        hiddenLayers = expanded;
     }
 
     // Sample a type index weighted by probabilities.
@@ -167,7 +199,7 @@ class ShotTypeSelector {
         float[] target = rewardSoftmax(rewards, SELECTOR_TEMP);
 
         // Forward pass (stores lastInput / lastPreActivation for backward).
-        float[] hidden = hiddenLayer.feedForward(state);
+        float[] hidden = feedForwardHidden(state);
         float[] logits = outputLayer.feedForward(hidden);
         float[] pred   = softmax(logits);
 
@@ -189,7 +221,7 @@ class ShotTypeSelector {
 
         // Backprop through 2-layer network.
         float[] gradHidden = outputLayer.backward(gradLogits, SELECTOR_LR);
-        hiddenLayer.backward(gradHidden, SELECTOR_LR);
+        backwardHidden(gradHidden, SELECTOR_LR);
 
         updateCount++;
         updateBaselineWindow(pred);
@@ -292,7 +324,9 @@ class ShotTypeSelector {
             }
             sb.append('\n');
         }
-        hiddenLayer.appendSave(sb, "sel_hidden");
+        for (int i = 0; i < hiddenLayers.length; i++) {
+            hiddenLayers[i].appendSave(sb, "sel_hidden" + (i + 1));
+        }
         outputLayer.appendSave(sb, "sel_output");
         sb.append("@end\n");
     }
@@ -300,6 +334,7 @@ class ShotTypeSelector {
     // Load from lines starting at @selector, return index after @end.
     int loadFromLines(String[] lines, int startIdx) {
         int idx = startIdx + 1; // skip @selector line
+        hiddenLayers = new NeuronLayer[0];
         while (idx < lines.length) {
             String line = trim(lines[idx]);
             if (line.equals("@end")) return idx + 1;
@@ -318,11 +353,15 @@ class ShotTypeSelector {
                 continue;
             }
             if (line.startsWith("@layer sel_hidden")) {
-                idx = hiddenLayer.loadSelf(lines, idx);
+                NeuronLayer loaded = new NeuronLayer(1, 1);
+                idx = loaded.loadSelf(lines, idx);
+                appendLoadedHiddenLayer(loaded);
                 continue;
             }
             if (line.startsWith("@layer sel_output")) {
-                idx = outputLayer.loadSelf(lines, idx);
+                NeuronLayer loaded = new NeuronLayer(1, 1);
+                idx = loaded.loadSelf(lines, idx);
+                outputLayer = loaded;
                 continue;
             }
             idx++;

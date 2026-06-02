@@ -11,7 +11,7 @@ class PolicyDiagnostics {
     if (policy == null || layout == null) return;
 
     float[] state  = policy.convertState(layout, stonesLeft, lastTeam);
-    float[] hidden = policy.hiddenLayer.feedForward(state);
+    float[] hidden = policy.feedForwardHidden(state);
     float[] means  = policy.outputLayer.feedForward(hidden);
     float[] logStds = policy.meanAndStd ? policy.outputLogStd.feedForward(hidden) : null;
 
@@ -278,7 +278,7 @@ class PolicyDiagnostics {
     if (policy == null) {
       return "  hRms=0.000  zRms=0.000  zMax=0.000  normRms=0.000  inactive=0.0%";
     }
-    NeuronLayer layer = policy.hiddenLayer;
+    NeuronLayer layer = policy.lastHiddenLayer();
     float hRms = hiddenRms(hidden);
     float zRms = hiddenRms(layer != null ? layer.lastRawPreActivation : null);
     float zMax = maxAbs(layer != null ? layer.lastRawPreActivation : null);

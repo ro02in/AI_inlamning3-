@@ -1,11 +1,4 @@
-// Shot-type selector network.
-//
-// A small neural network: inputSize -> 3 hidden layers (RELU) -> numTypes (LINEAR logits).
-// Training: for a given board state, evaluate each expert's shot via FinalScoreHeuristic
-// (full self-play rollout if depth > 1). Compute reward-weighted softmax target and
-// add an entropy bonus to prevent locking onto one shot type.
-//
-// Inference: softmax over logits -> sample (PLAY) or argmax (TEST).
+// Chooses which expert should be used for a board state.
 class ShotTypeSelector {
     GradientEnsemble ensemble;
     int numTypes;
@@ -20,32 +13,25 @@ class ShotTypeSelector {
     ArrayList<Stone> stones = new ArrayList<Stone>();
 
     int updateCount = 0;
-    int logEvery    = 200;
-    float[] baselineProbs;
-    float[] baselineWindowSums;
-    int baselineWindowCount = 0;
+    int logEvery = 200;
 
     ShotTypeSelector(GradientEnsemble ensemble) {
-        this.ensemble  = ensemble;
-        this.numTypes  = ensemble.count;
-        // Input size matches the expert policies' input encoding.
+        this.ensemble = ensemble;
+        this.numTypes = ensemble.count;
         this.inputSize = TOTAL_STONES * 4 + 2;
         initializeHiddenLayers(defaultHiddenLayerCount);
-        outputLayer = new NeuronLayer(numTypes,   hiddenSize, ActivationKind.LINEAR);
-        initBaseline();
+        outputLayer = new NeuronLayer(numTypes, hiddenSize, ActivationKind.LINEAR);
     }
 
     void reset() {
         initializeHiddenLayers(defaultHiddenLayerCount);
-        outputLayer = new NeuronLayer(numTypes,   hiddenSize, ActivationKind.LINEAR);
+        outputLayer = new NeuronLayer(numTypes, hiddenSize, ActivationKind.LINEAR);
         updateCount = 0;
-        initBaseline();
     }
 
-    // Compute softmax probabilities for the given state.
     float[] probs(float[] state) {
-        float[] hidden  = feedForwardHidden(state);
-        float[] logits  = outputLayer.feedForward(hidden);
+        float[] hidden = feedForwardHidden(state);
+        float[] logits = outputLayer.feedForward(hidden);
         return softmax(logits);
     }
 
@@ -53,8 +39,7 @@ class ShotTypeSelector {
         hiddenLayers = new NeuronLayer[max(1, count)];
         int previousSize = inputSize;
         for (int i = 0; i < hiddenLayers.length; i++) {
-            hiddenLayers[i] = new NeuronLayer(hiddenSize, previousSize,
-                                              ActivationKind.RELU, NormKind.LAYERNORM);
+            hiddenLayers[i] = new NeuronLayer(hiddenSize, previousSize, ActivationKind.RELU);
             previousSize = hiddenSize;
         }
     }
@@ -82,24 +67,8 @@ class ShotTypeSelector {
         hiddenLayers = expanded;
     }
 
-    // Sample a type index weighted by probabilities.
-    int sample(float[] state) {
-        return sampleFromProbs(probs(state));
-    }
-
-    // Argmax type index (deterministic, for TEST mode).
     int argmax(float[] state) {
         return argmaxFromProbs(probs(state));
-    }
-
-    int sampleFromProbs(float[] p) {
-        float r = random(1.0);
-        float acc = 0;
-        for (int i = 0; i < p.length; i++) {
-            acc += p[i];
-            if (r <= acc) return i;
-        }
-        return p.length - 1;
     }
 
     int argmaxFromProbs(float[] p) {
@@ -110,153 +79,52 @@ class ShotTypeSelector {
         return best;
     }
 
-    int sampleTopKFromProbs(float[] p, float eps) {
-        float maxP = 0;
-        for (float v : p) maxP = max(maxP, v);
-        float sum = 0;
-        for (float v : p) if (v >= maxP - eps) sum += v;
-        if (sum <= 0) return argmaxFromProbs(p);
-        float r = random(sum);
-        float acc = 0;
-        for (int i = 0; i < p.length; i++) {
-            if (p[i] < maxP - eps) continue;
-            acc += p[i];
-            if (r <= acc) return i;
-        }
-        return argmaxFromProbs(p);
-    }
-
-    void initBaseline() {
-        baselineProbs = new float[numTypes];
-        baselineWindowSums = new float[numTypes];
-        baselineWindowCount = 0;
-        for (int i = 0; i < numTypes; i++) baselineProbs[i] = 1.0f / max(1, numTypes);
-    }
-
-    float[] relativeOdds(float[] p) {
-        if (baselineProbs == null || baselineProbs.length != p.length) initBaseline();
-        float[] odds = new float[p.length];
-        float sum = 0;
-        for (int i = 0; i < p.length; i++) {
-            odds[i] = max(0, p[i] - baselineProbs[i]);
-            sum += odds[i];
-        }
-        if (sum <= 1e-6f) {
-            odds[argmaxFromProbs(p)] = 1;
-            return odds;
-        }
-        for (int i = 0; i < odds.length; i++) odds[i] /= sum;
-        return odds;
-    }
-
-    void updateBaselineWindow(float[] p) {
-        if (baselineProbs == null || baselineProbs.length != p.length) initBaseline();
-        for (int i = 0; i < p.length; i++) baselineWindowSums[i] += p[i];
-        baselineWindowCount++;
-        if (baselineWindowCount >= SELECTOR_BASELINE_WINDOW) {
-            for (int i = 0; i < p.length; i++) {
-                baselineProbs[i] = baselineWindowSums[i] / max(1, baselineWindowCount);
-                baselineWindowSums[i] = 0;
-            }
-            baselineWindowCount = 0;
-        }
-    }
-
-    // One training update. Randomizes a board at the given curriculum depth,
-    // evaluates each expert's shot with the FinalScoreHeuristic, then trains
-    // the selector toward the reward-weighted softmax target.
     void updateStep(int depthCap) {
-        int depth         = max(1, (int) random(1, depthCap + 1));
+        int depth = max(1, (int) random(1, depthCap + 1));
         int stonesToPlace = TOTAL_STONES - depth;
         randomState.randomizeForDepth(stones, stonesToPlace);
         int stonesLeft = max(1, (int) ceil(depth / 2.0));
 
-        // Use the first expert's convertState (all policies share the same encoding).
         NeuralPolicy refPolicy = ensemble.anyPolicy();
         float[] state = refPolicy.convertState(stones, stonesLeft, TEAM_RED);
 
-        // Evaluate each expert's mean shot via final score plus a type-specific hint.
         float[] rewards = new float[numTypes];
-        float[] finalRewards = new float[numTypes];
-        float[] typeRewards = new float[numTypes];
-        FinalScoreHeuristic fsh = ensemble.finalHeuristic;
+        FinalScoreHeuristic finalScore = ensemble.finalHeuristic;
         for (int t = 0; t < numTypes; t++) {
             NeuralPolicy p = ensemble.trainers[t].policy;
             float[] expertState = p.convertState(stones, stonesLeft, TEAM_RED);
             Shot shot = p.predictMean(expertState);
-            ShotResult result = simulateShot(shot, stones, depth - 1);
-            finalRewards[t] = fsh.contribute(fsh.scoreResult(result));
+            ShotResult result = simulateShot(shot, stones);
+
             float typeReward = 0;
             for (Heuristic h : ensemble.typeHeuristics[t]) {
                 if (h instanceof FinalScoreHeuristic) continue;
                 typeReward += h.contribute(h.scoreResult(result));
             }
-            typeRewards[t] = typeReward;
-            rewards[t] = finalRewards[t] + SELECTOR_TYPE_REWARD_BLEND * typeReward;
+            float finalReward = finalScore.contribute(finalScore.scoreResult(result));
+            rewards[t] = finalReward + SELECTOR_TYPE_REWARD_BLEND * typeReward;
         }
 
-        // Build the target distribution from reward-weighted softmax.
         float[] target = rewardSoftmax(rewards, SELECTOR_TEMP);
-
-        // Forward pass (stores lastInput / lastPreActivation for backward).
         float[] hidden = feedForwardHidden(state);
         float[] logits = outputLayer.feedForward(hidden);
-        float[] pred   = softmax(logits);
+        float[] pred = softmax(logits);
 
-        // Cross-entropy gradient: dL/d(logit_i) = pred_i - target_i.
-        // Subtract entropy gradient: -dH/d(logit_i) = pred_i*(log(pred_i)+H)
-        //   simplified: push toward target + push away from argmax to keep entropy.
         float[] gradLogits = new float[numTypes];
-        float H = 0;
         for (int i = 0; i < numTypes; i++) {
-            if (pred[i] > 0) H -= pred[i] * log(pred[i]);
-        }
-        for (int i = 0; i < numTypes; i++) {
-            // CE gradient: pred - target (we ascend, so negate to get gradient of -loss)
-            float ceGrad = -(pred[i] - target[i]); // ascent on reward
-            // Entropy gradient: +dH/d(logit_i) = pred_i*(H + log(pred_i)) (push entropy up)
-            float entropyGrad = pred[i] * (H + (pred[i] > 0 ? log(pred[i]) : 0));
-            gradLogits[i] = ceGrad + SELECTOR_ENTROPY * entropyGrad;
+            gradLogits[i] = target[i] - pred[i];
         }
 
-        // Backprop through 2-layer network.
         float[] gradHidden = outputLayer.backward(gradLogits, SELECTOR_LR);
         backwardHidden(gradHidden, SELECTOR_LR);
 
         updateCount++;
-        updateBaselineWindow(pred);
-        boolean shouldLog = (updateCount == 1 || updateCount % logEvery == 0);
-        if (shouldLog) {
-            print("Selector step " + updateCount + "  depth=" + depth + "  probs=[");
-            for (int i = 0; i < numTypes; i++) {
-                print(ensemble.names[i] + ":" + nf(pred[i], 0, 2));
-                if (i < numTypes - 1) print(", ");
-            }
-            println("]  H=" + nf(H, 0, 3));
-            print("  selectorReward=[");
-            for (int i = 0; i < numTypes; i++) {
-                print(ensemble.names[i] + ":" + nf(rewards[i], 0, 2)
-                      + "(F=" + nf(finalRewards[i], 0, 2)
-                      + ",T=" + nf(typeRewards[i], 0, 2) + ")");
-                if (i < numTypes - 1) print(", ");
-            }
-            println("]");
-            print("  selectorTarget=[");
-            for (int i = 0; i < numTypes; i++) {
-                print(ensemble.names[i] + ":" + nf(target[i], 0, 2));
-                if (i < numTypes - 1) print(", ");
-            }
-            println("]");
-            print("  selectorBaseline=[");
-            for (int i = 0; i < numTypes; i++) {
-                print(ensemble.names[i] + ":" + nf(baselineProbs[i], 0, 2));
-                if (i < numTypes - 1) print(", ");
-            }
-            println("]");
+        if (updateCount == 1 || updateCount % logEvery == 0) {
+            println("Selector step " + updateCount
+                + " depth=" + depth
+                + " best=" + ensemble.names[argmaxFromProbs(target)]);
         }
     }
-
-    // ---- Helpers ----
 
     private float[] softmax(float[] x) {
         float maxX = Float.NEGATIVE_INFINITY;
@@ -267,19 +135,22 @@ class ShotTypeSelector {
             out[i] = exp(x[i] - maxX);
             sum += out[i];
         }
-        if (sum > 0) for (int i = 0; i < out.length; i++) out[i] /= sum;
+        if (sum > 0) {
+            for (int i = 0; i < out.length; i++) out[i] /= sum;
+        }
         return out;
     }
 
-    // Softmax of rewards / temperature -> target probabilities.
     private float[] rewardSoftmax(float[] rewards, float temp) {
         float[] scaled = new float[rewards.length];
-        for (int i = 0; i < rewards.length; i++) scaled[i] = rewards[i] / max(temp, 1e-6f);
+        for (int i = 0; i < rewards.length; i++) {
+            scaled[i] = rewards[i] / max(temp, 1e-6f);
+        }
         return softmax(scaled);
     }
 
-    private ShotResult simulateShot(Shot shot, ArrayList<Stone> layout, int shotsRemainingAfter) {
-        ArrayList<Stone> before    = copyLayout(layout);
+    private ShotResult simulateShot(Shot shot, ArrayList<Stone> layout) {
+        ArrayList<Stone> before = copyLayout(layout);
         ArrayList<Stone> simStones = copyLayout(layout);
         ScoreResult scoreBefore = house.scoreEnd(simStones);
 
@@ -292,13 +163,13 @@ class ShotTypeSelector {
         for (int step = 0; step < 100000; step++) {
             physics.step(simStones, DT);
             boolean anyMoving = false;
-            for (Stone s : simStones) if (s.isMoving()) { anyMoving = true; break; }
+            for (Stone s : simStones) {
+                if (s.isMoving()) { anyMoving = true; break; }
+            }
             if (!anyMoving) break;
         }
 
-        ShotResult result = new ShotResult(simStones, before, fired, scoreBefore, shot);
-        result.shotsRemainingAfter = shotsRemainingAfter;
-        return result;
+        return new ShotResult(simStones, before, fired, scoreBefore, shot);
     }
 
     private ArrayList<Stone> copyLayout(ArrayList<Stone> layout) {
@@ -311,19 +182,9 @@ class ShotTypeSelector {
         return copy;
     }
 
-    // ---- Serialization ----
-
     void appendSave(StringBuilder sb) {
         sb.append("@selector\n");
         sb.append("update_count=").append(updateCount).append('\n');
-        if (baselineProbs != null) {
-            sb.append("baseline_probs=");
-            for (int i = 0; i < baselineProbs.length; i++) {
-                if (i > 0) sb.append(' ');
-                sb.append(baselineProbs[i]);
-            }
-            sb.append('\n');
-        }
         for (int i = 0; i < hiddenLayers.length; i++) {
             hiddenLayers[i].appendSave(sb, "sel_hidden" + (i + 1));
         }
@@ -331,24 +192,14 @@ class ShotTypeSelector {
         sb.append("@end\n");
     }
 
-    // Load from lines starting at @selector, return index after @end.
     int loadFromLines(String[] lines, int startIdx) {
-        int idx = startIdx + 1; // skip @selector line
+        int idx = startIdx + 1;
         hiddenLayers = new NeuronLayer[0];
         while (idx < lines.length) {
             String line = trim(lines[idx]);
             if (line.equals("@end")) return idx + 1;
             if (line.startsWith("update_count=")) {
                 updateCount = parseInt(line.substring(13));
-                idx++;
-                continue;
-            }
-            if (line.startsWith("baseline_probs=")) {
-                String[] parts = split(trim(line.substring(15)), ' ');
-                if (baselineProbs == null || baselineProbs.length != numTypes) initBaseline();
-                for (int i = 0; i < min(numTypes, parts.length); i++) {
-                    baselineProbs[i] = parseFloat(parts[i]);
-                }
                 idx++;
                 continue;
             }

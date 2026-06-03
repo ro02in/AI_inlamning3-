@@ -281,7 +281,6 @@ class UI {
 
     float btnW    = SIDEBAR_W - 40;
     float halfW   = (btnW - 6) * 0.5f;
-    float quarterW = (btnW - 6 * 3) / 4.0f;
     float halfX   = ICE_W + (SIDEBAR_W - btnW) * 0.5f;
 
     shootBtn = new Button("L\u00e5s vinkel", halfX, BTN_TOP, btnW, 52);
@@ -303,8 +302,6 @@ class UI {
                                EXTRA_BTN_TOP,
                                halfW, 28);
 
-    float expertGap    = 6;
-    float expertThirdW = (btnW - expertGap * 2) / 3.0f;
     lockPhase = PHASE_ANGLE;
   }
 
@@ -628,7 +625,7 @@ class UI {
     if (activeSlider != null) activeSlider.setFromMouseY(my);
   }
 
-  void onMouseReleased(float mx, float my) {
+  void onMouseReleased() {
     draggingTrainBar = false;
     if (activeSlider != null) activeSlider.dragging = false;
     activeSlider = null;

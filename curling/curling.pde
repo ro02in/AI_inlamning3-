@@ -45,23 +45,15 @@ AppMode appMode = AppMode.PLAY;
 // ----- Backend training constants. Tuneable. --------
 final int   SHOTS_PER_ROUND    = 50;    // shots sampled per expert per update
 final int   CURRICULUM_STEP    = 500;   // training steps before adding another stone depth
-final float SELECTOR_ENTROPY   = 0.02f; // entropy bonus for shot-type selector
-final float EXPERT_ENTROPY     = 0.006f;// low-std support for shot experts
+final int   PLAY_CANDIDATE_EXPERTS = 3; // current expert shots tested during NN play
+final int   NEXT_UTILITY_EXPERTS   = 3; // next-shot experts used for expected utility
+final int   SIMS_PER_EXPERT_SHOT  = 3;  // repeated simulations per expert shot
 final float SELECTOR_TEMP      = 1.0f;  // temperature for reward->target softmax
 final float SELECTOR_LR        = 0.001f;// selector network learning rate
 final float SELECTOR_TYPE_REWARD_BLEND = 0.30f; // finalScore + blend * type heuristic
-final boolean TEST_TOP_K_ENABLED = false; // debug: sample near-tied selector types in TEST
-final float TEST_TOP_K_EPS       = 0.02f; // probability window below max for TEST_TOP_K
-final boolean USE_ROLLOUT_DECISION = true; // evaluate expert shots by rollout before choosing
-final int SELECTOR_BASELINE_WINDOW = 500; // steps used to refresh selector mean probabilities
-final float DECISION_NN_WEIGHT = 0.50f; // relative selector odds contribution
-final float DECISION_FINAL_SCORE_WEIGHT = 0.50f; // rollout top-4 odds contribution
 
 GradientEnsemble gradientEnsemble;
 ShotTypeSelector shotSelector;
-SelfPlayRollout  selfPlayRollout;
-
-PolicyDiagnostics  policyDiagnostics;
 ModelStorage       modelStorage;
 
 int  trainingTarget = 100;
@@ -102,10 +94,8 @@ void setup() {
   ui      = new UI();
   game    = new Game();
 
-  selfPlayRollout   = new SelfPlayRollout();
   gradientEnsemble  = new GradientEnsemble();
   shotSelector      = new ShotTypeSelector(gradientEnsemble);
-  policyDiagnostics = new PolicyDiagnostics();
   modelStorage      = new ModelStorage();
 
 }
@@ -115,12 +105,13 @@ int curriculumDepthCap() {
   return min(TOTAL_STONES, 1 + trainingDone / CURRICULUM_STEP);
 }
 
-// Dispatch inference using selector-filtered rollout choice.
-// sampleMode is kept for diagnostics/legacy toggles; rollout decision is deterministic.
+// Dispatch inference using the selector to choose one expert.
 Shot bestShotActive(ArrayList<Stone> layout, int stonesLeft, int lastTeam,
-                    boolean logScores, boolean sampleMode) {
+                    int remainingShotsAfterCurrent,
+                    boolean logScores) {
   return gradientEnsemble.bestShot(layout, stonesLeft, lastTeam,
-                                   shotSelector, logScores, sampleMode);
+                                   remainingShotsAfterCurrent,
+                                   shotSelector, logScores, false);
 }
 
 void resetActiveTrainer() {
@@ -248,7 +239,7 @@ void runAiTestSim() {
   aiTestStones = new ArrayList<Stone>();
   aiTestRandom.randomize(aiTestStones, STONES_PER_TEAM);
 
-  aiTestLastShot = bestShotActive(aiTestStones, 1, TEAM_RED, true, false);
+  aiTestLastShot = bestShotActive(aiTestStones, 1, TEAM_RED, 0, true);
 
   PVector h = sheet.hackWorld();
   Stone fired = new Stone(h.x, h.y, TEAM_YELLOW);
@@ -330,7 +321,7 @@ void mouseDragged() {
 }
 
 void mouseReleased() {
-  ui.onMouseReleased(mouseX, mouseY);
+  ui.onMouseReleased();
 }
 void mouseMoved()    { ui.onMouseMoved(mouseX, mouseY); }
 
@@ -354,7 +345,7 @@ ArrayList<Stone> copyLayout(ArrayList<Stone> layout) {
   return copy;
 }
 
-Shot mcBestShot(ArrayList<Stone> layout, int stonesLeft, int lastTeam) {
+Shot mcBestShot(ArrayList<Stone> layout) {
   int N = 80;
   Shot best = null;
   float bestScore = Float.NEGATIVE_INFINITY;
@@ -400,10 +391,11 @@ void maybeAiShoot() {
 
   Shot shot;
   if (activeAiType == 1) {
-    shot = mcBestShot(game.stones, game.stonesRemaining(TEAM_YELLOW), lastTeam);
+    shot = mcBestShot(game.stones);
   } else {
+    int remainingShotsAfterCurrent = max(0, TOTAL_STONES - (game.stonesThrown + 1));
     shot = bestShotActive(game.stones, game.stonesRemaining(TEAM_YELLOW),
-                          lastTeam, true, true);
+                          lastTeam, remainingShotsAfterCurrent, true);
   }
   game.fire(shot);
 }

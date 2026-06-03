@@ -5,7 +5,6 @@ class ShotResult {
     Stone            fired;
     ScoreResult      scoreBefore;
     Shot             plannedShot;
-    int              shotsRemainingAfter; // depth - 1 (for finalScore rollout)
 
     ShotResult(ArrayList<Stone> stonesAfter, ArrayList<Stone> stonesBefore,
                Stone fired, ScoreResult scoreBefore, Shot plannedShot) {
@@ -14,7 +13,6 @@ class ShotResult {
         this.fired               = fired;
         this.scoreBefore         = scoreBefore;
         this.plannedShot         = plannedShot;
-        this.shotsRemainingAfter = 0;
     }
 }
 
@@ -112,18 +110,19 @@ class TakeoutHeuristic extends Heuristic {
                 displacementBonus += 3.0;
                 if (wasHouseStone) displacementBonus += 2.0;
                 if (wasGuard) displacementBonus += 1.5;
-            } else {
-                float distAfter = house.distanceToButton(matchAfter);
+            } else if (matchAfter != null) {
+                Stone movedStone = matchAfter;
+                float distAfter = house.distanceToButton(movedStone);
                 // Bonus for moving it further from center
                 float pushed = max(0, distAfter - distBefore);
                 displacementBonus += pushed * 0.8;
                 if (minMove > 0.75f) displacementBonus += min(1.5f, minMove * 0.4f);
                 // Extra bonus for removing it from the house
-                if (wasHouseStone && !house.inHouse(matchAfter)) {
+                if (wasHouseStone && !house.inHouse(movedStone)) {
                     displacementBonus += 2.0;
                 }
                 // Bonus for clearing a guard
-                if (wasGuard && !house.inHouse(matchAfter) && matchAfter.pos.y >= house.BUTTON.y) {
+                if (wasGuard && !house.inHouse(movedStone) && movedStone.pos.y >= house.BUTTON.y) {
                     displacementBonus += 1.5;
                 }
             }
@@ -276,9 +275,7 @@ class FreezeHeuristic extends Heuristic {
     }
 }
 
-// ---- FinalScore heuristic: self-play rollout ----
-// When shotsRemainingAfter > 0, simulates remaining shots via selector.
-// Otherwise falls back to immediate score delta.
+// ---- FinalScore heuristic: immediate score after this shot ----
 class FinalScoreHeuristic extends Heuristic {
     FinalScoreHeuristic() {
         this.scale  = 3.0;
@@ -287,11 +284,6 @@ class FinalScoreHeuristic extends Heuristic {
 
     @Override
     float scoreResult(ShotResult result) {
-        if (result.shotsRemainingAfter > 0 && shotSelector != null) {
-            // Roll out the rest of the end from yellow's perspective.
-            return selfPlayRollout.rollout(result.stonesAfter, result.shotsRemainingAfter);
-        }
-        // Last shot or no selector yet: immediate score.
         ScoreResult after = house.scoreEnd(result.stonesAfter);
         return after.diffFrom(result.scoreBefore);
     }

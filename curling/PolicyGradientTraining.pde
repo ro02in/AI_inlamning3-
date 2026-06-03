@@ -1,32 +1,24 @@
-// REINFORCE-style policy gradient training for a meanAndStd NeuralPolicy.
+// Simple gradient training for one shot expert.
 //
-// Each update step:
-//   1. Randomize board state for the given curriculum depth.
-//   2. Single forward pass → (μ, log σ) per action dimension (stored for backprop).
-//   3. Sample shotsPerUpdate shots from the Gaussian without re-running forward.
-//   4. Simulate each with physics, score with type-specific + finalScore heuristics.
-//   5. Subtract baseline (mean reward) → advantages.
-//   6. Keep elite top-10% by advantage.
-//   7. Compute weighted-average REINFORCE gradient across elites + entropy bonus.
-//   8. Backprop through the network (Adam).
+// Each update:
+//   1. Build a random board from the curriculum depth.
+//   2. Let the policy predict one shot.
+//   3. Try many random nearby shots.
+//   4. Simulate and score those shots.
+//   5. Move the policy output toward the best sampled shots.
 class PolicyGradientTraining {
     NeuralPolicy policy;
     String expertName = "";
 
-    int   shotsPerUpdate  = 50;
-    float eliteFraction   = 0.25f;
-    float learningRate    = 0.0007f;
-    int   logEvery        = 100;
+    int   shotsPerUpdate = 50;
+    float eliteFraction  = 0.25f;
+    float learningRate   = 0.0004f;
+    int   logEvery       = 100;
 
-    final float TARGET_STD_CURL_TANH  = 0.45f;
-    final float TARGET_STD_SPEED_TANH = 0.35f;
-    final float TARGET_STD_ANGLE_TANH = 0.30f;
-    final float STD_REG_STRENGTH      = 0.08f;
-    final float GRAD_LOG_STD_LIMIT    = 0.25f;
-    final float GRAD_MEAN_LIMIT       = 1.50f;
-    final float RAW_CLIP_PENALTY      = 0.08f;
-    final float MEAN_SAT_PENALTY      = 0.08f;
-    final float MEAN_SAT_GRAD         = 0.12f;
+    final float EXPLORE_CURL_TANH  = 0.35f;
+    final float EXPLORE_SPEED_TANH = 0.30f;
+    final float EXPLORE_ANGLE_TANH = 0.30f;
+    final float GRAD_LIMIT         = 1.25f;
 
     int updateCount = 0;
 
@@ -34,25 +26,21 @@ class PolicyGradientTraining {
     ArrayList<Stone> stones = new ArrayList<Stone>();
 
     PolicyGradientTraining() {
-        policy = new NeuralPolicy(true);
-        initializeLogStdToTargets();
+        policy = new NeuralPolicy();
     }
 
     PolicyGradientTraining(NeuralPolicy seed) {
         policy = seed;
-        initializeLogStdToTargets();
     }
 
     void reset() {
         if (policy != null) {
             policy = new NeuralPolicy(policy.minCurl, policy.maxCurl,
-                                    policy.minSpeed, policy.maxSpeed,
-                                    policy.minAngleDeg, policy.maxAngleDeg,
-                                    policy.meanAndStd);
+                                      policy.minSpeed, policy.maxSpeed,
+                                      policy.minAngleDeg, policy.maxAngleDeg);
         } else {
-            policy = new NeuralPolicy(true);
+            policy = new NeuralPolicy();
         }
-        initializeLogStdToTargets();
         updateCount = 0;
     }
 
@@ -62,8 +50,6 @@ class PolicyGradientTraining {
         if (loadedUpdateCount >= 0) updateCount = loadedUpdateCount;
     }
 
-    // Main training entry point, called by GradientEnsemble.
-    // depth = how many shots remain including the one being trained (1..TOTAL_STONES).
     void updateStep(ArrayList<Heuristic> heuristics, int depth) {
         updateStep(heuristics, depth, expertName);
     }
@@ -71,233 +57,66 @@ class PolicyGradientTraining {
     void updateStep(ArrayList<Heuristic> heuristics, int depth, String curriculumExpert) {
         if (heuristics == null || heuristics.isEmpty()) return;
 
-        // 1. Random board state based on curriculum depth.
-        //    stonesToPlace = stones already on the ice before yellow throws.
         int stonesToPlace = TOTAL_STONES - depth;
         randomState.randomizeForExpert(stones, stonesToPlace, curriculumExpert);
 
-        // stonesLeft for yellow: how many shots yellow still has including this one.
         int stonesLeft = max(1, (int) ceil(depth / 2.0));
         float[] state = policy.convertState(stones, stonesLeft, TEAM_RED);
 
-        // 2. Single forward pass.
-        float[] hidden  = policy.feedForwardHidden(state);
-        float[] means   = policy.outputLayer.feedForward(hidden);
-        float[] logStds = policy.outputLogStd.feedForward(hidden);
+        float[] predictedRaw = policy.rawOutput(state);
 
-        float[] sigmas = new float[3];
-        for (int i = 0; i < 3; i++) {
-            sigmas[i] = policy.sigmaFromLogStd(i, logStds[i]);
-        }
-        int meanSatCount = 0;
-        for (int i = 0; i < 3; i++) {
-            if (abs(means[i]) > 0.9f) meanSatCount++;
-        }
+        int n = shotsPerUpdate;
+        float[][] sampledRaw = new float[n][3];
+        float[] rewards = new float[n];
 
-        // 3. Sample N actions.
-        int N = shotsPerUpdate;
-        float[][] actionRaws = new float[N][3];
-        Shot[]    shots      = new Shot[N];
-        int[]      rawClips   = new int[N];
-        int        rawClipTotal = 0;
+        for (int k = 0; k < n; k++) {
+            sampledRaw[k][0] = constrain(predictedRaw[0] + randomGaussian() * EXPLORE_CURL_TANH, -1f, 1f);
+            sampledRaw[k][1] = constrain(predictedRaw[1] + randomGaussian() * EXPLORE_SPEED_TANH, -1f, 1f);
+            sampledRaw[k][2] = constrain(predictedRaw[2] + randomGaussian() * EXPLORE_ANGLE_TANH, -1f, 1f);
 
-        for (int k = 0; k < N; k++) {
-            actionRaws[k] = new float[3];
-            for (int i = 0; i < 3; i++) {
-                actionRaws[k][i] = means[i] + sigmas[i] * randomGaussian();
-                if (actionRaws[k][i] < -1f || actionRaws[k][i] > 1f) {
-                    rawClips[k]++;
-                    rawClipTotal++;
-                }
-            }
-            float curl  = policy.mapTanhToRange(constrain(actionRaws[k][0], -1f, 1f),
-                                                policy.minCurl,     policy.maxCurl);
-            float speed = policy.mapTanhToRange(constrain(actionRaws[k][1], -1f, 1f),
-                                                policy.minSpeed,    policy.maxSpeed);
-            float angle = policy.mapTanhToRange(constrain(actionRaws[k][2], -1f, 1f),
-                                                policy.minAngleDeg, policy.maxAngleDeg);
-            shots[k] = new Shot(curl, speed, radians(angle));
-        }
-
-        // 4. Simulate each shot and score.
-        float[] rewards = new float[N];
-        for (int k = 0; k < N; k++) {
-            ShotResult result = simulateShot(shots[k], stones, depth - 1);
+            ShotResult result = simulateShot(policy.shotFromRaw(sampledRaw[k]), stones);
             float score = 0;
-            for (Heuristic h : heuristics) score += h.contribute(h.scoreResult(result));
-            rewards[k] = score
-                       - rawClips[k] * RAW_CLIP_PENALTY
-                       - meanSatCount * MEAN_SAT_PENALTY;
-        }
-
-        // 5. Baseline subtraction.
-        float meanReward = 0;
-        float maxReward  = Float.NEGATIVE_INFINITY;
-        float minReward  = Float.POSITIVE_INFINITY;
-        for (float rv : rewards) {
-            meanReward += rv;
-            maxReward   = max(maxReward, rv);
-            minReward   = min(minReward, rv);
-        }
-        meanReward /= N;
-
-        float rewardVar = 0;
-        for (float rv : rewards) {
-            float d = rv - meanReward;
-            rewardVar += d * d;
-        }
-        float rewardStd = sqrt(rewardVar / max(1, N));
-
-        float[] advantages = new float[N];
-        for (int k = 0; k < N; k++) {
-            advantages[k] = rewardStd > 1e-6f ? (rewards[k] - meanReward) / rewardStd : 0;
-        }
-
-        // 6. Keep elite top-k.
-        int eliteCount = max(1, round(N * eliteFraction));
-        int[] eliteIdx = topKIndices(advantages, eliteCount);
-
-        float advSum = 0;
-        for (int idx : eliteIdx) {
-            if (advantages[idx] > 0) advSum += advantages[idx];
-        }
-        updateCount++;
-        boolean shouldLog = (updateCount == 1 || updateCount % logEvery == 0);
-        if (advSum <= 0) {
-            if (shouldLog) {
-                policyDiagnostics.logGradientTrainingStep(
-                    expertName, policy, hidden,
-                    updateCount, meanReward, maxReward, minReward,
-                    eliteCount, advSum, true, means, sigmas, new float[3], new float[3],
-                    stdAtMaxPct(logStds), stdAtMinPct(logStds), rawLogStdMin(logStds),
-                    rawLogStdMax(logStds), logStdBelowMinGap(logStds), logStdAboveMaxGap(logStds),
-                    rawClipPct(rawClipTotal, N),
-                    100.0f * meanSatCount / 3.0f, maxReward - minReward, 0, 0);
+            for (Heuristic h : heuristics) {
+                score += h.contribute(h.scoreResult(result));
             }
-            return;
+            rewards[k] = score;
         }
 
-        // 7. Accumulate weighted gradient.
-        float[] gradMean   = new float[3];
-        float[] gradLogStd = new float[3];
+        int eliteCount = max(1, round(n * eliteFraction));
+        int[] eliteIdx = topKIndices(rewards, eliteCount);
 
+        float[] targetRaw = new float[3];
         for (int idx : eliteIdx) {
-            float adv = advantages[idx];
-            if (adv <= 0) continue;
-            float w = adv / advSum;
-            float[] lpGrad = policy.logProbGradients(means, logStds, actionRaws[idx]);
             for (int i = 0; i < 3; i++) {
-                gradMean[i]   += w * lpGrad[i];
-                gradLogStd[i] += w * lpGrad[3 + i];
+                targetRaw[i] += sampledRaw[idx][i];
             }
         }
-
-        float entropyGradSum = 0;
-        float stdRegGradSum  = 0;
         for (int i = 0; i < 3; i++) {
-            float target = targetStd(i);
-            float entropyGrad = 0;
-            float stdRegGrad = 0;
-            if (sigmas[i] < target) {
-                entropyGrad = EXPERT_ENTROPY * ((target - sigmas[i]) / max(target, 1e-6f));
-            } else if (sigmas[i] > target) {
-                stdRegGrad = -STD_REG_STRENGTH
-                           * ((sigmas[i] - target) / max(policy.maxStdTanh(i) - target, 1e-6f));
-            }
-            gradLogStd[i] += entropyGrad + stdRegGrad;
-            if (logStds[i] <= policy.logStdMin(i) && gradLogStd[i] < 0) gradLogStd[i] = 0;
-            if (logStds[i] >= policy.logStdMax(i) && gradLogStd[i] > 0) gradLogStd[i] = 0;
-            gradLogStd[i] = constrain(gradLogStd[i], -GRAD_LOG_STD_LIMIT, GRAD_LOG_STD_LIMIT);
-            entropyGradSum += entropyGrad;
-            stdRegGradSum  += stdRegGrad;
-
-            if (abs(means[i]) > 0.9f) {
-                gradMean[i] -= (means[i] > 0 ? 1 : -1) * MEAN_SAT_GRAD;
-            }
-            gradMean[i] = constrain(gradMean[i], -GRAD_MEAN_LIMIT, GRAD_MEAN_LIMIT);
+            targetRaw[i] /= eliteCount;
         }
 
-        // 8. Backprop.
-        policy.backwardMeanAndStd(gradMean, gradLogStd, learningRate);
+        float[] gradOutput = new float[3];
+        for (int i = 0; i < 3; i++) {
+            gradOutput[i] = constrain(targetRaw[i] - predictedRaw[i], -GRAD_LIMIT, GRAD_LIMIT);
+        }
+
+        policy.backwardOutput(gradOutput, learningRate);
         policy.clipWeights();
+        updateCount++;
 
-        if (shouldLog) {
-            policyDiagnostics.logGradientTrainingStep(
-                expertName, policy, hidden,
-                updateCount, meanReward, maxReward, minReward,
-                eliteCount, advSum, false, means, sigmas, gradMean, gradLogStd,
-                stdAtMaxPct(logStds), stdAtMinPct(logStds), rawLogStdMin(logStds),
-                rawLogStdMax(logStds), logStdBelowMinGap(logStds), logStdAboveMaxGap(logStds),
-                rawClipPct(rawClipTotal, N),
-                100.0f * meanSatCount / 3.0f, maxReward - minReward,
-                entropyGradSum / 3.0f, stdRegGradSum / 3.0f);
+        if (updateCount == 1 || updateCount % logEvery == 0) {
+            println("Train " + expertName
+                + " step=" + updateCount
+                + " depth=" + depth
+                + " best=" + nf(rewards[eliteIdx[0]], 0, 3)
+                + " grad=[" + nf(gradOutput[0], 0, 3)
+                + "," + nf(gradOutput[1], 0, 3)
+                + "," + nf(gradOutput[2], 0, 3) + "]");
         }
     }
 
-    float targetStd(int dim) {
-        if (dim == 0) return TARGET_STD_CURL_TANH;
-        if (dim == 1) return TARGET_STD_SPEED_TANH;
-        return TARGET_STD_ANGLE_TANH;
-    }
-
-    void initializeLogStdToTargets() {
-        if (policy == null || !policy.meanAndStd || policy.outputLogStd == null) return;
-        for (int i = 0; i < min(3, policy.outputLogStd.neurons.length); i++) {
-            Neuron n = policy.outputLogStd.neurons[i];
-            for (int j = 0; j < n.weights.length; j++) n.weights[j] = 0;
-            n.bias = constrain(log(targetStd(i)), policy.logStdMin(i), policy.logStdMax(i));
-        }
-        policy.outputLogStd.initAdam(policy.outputLogStd.neurons.length,
-                                     policy.outputLogStd.neurons[0].weights.length);
-    }
-
-    float rawClipPct(int rawClipTotal, int sampleCount) {
-        return 100.0f * rawClipTotal / max(1, sampleCount * 3);
-    }
-
-    float stdAtMaxPct(float[] logStds) {
-        int count = 0;
-        for (int i = 0; i < 3; i++) {
-            if (policy.logStdAtMax(i, logStds[i])) count++;
-        }
-        return 100.0f * count / 3.0f;
-    }
-
-    float stdAtMinPct(float[] logStds) {
-        int count = 0;
-        for (int i = 0; i < 3; i++) {
-            if (policy.logStdAtMin(i, logStds[i])) count++;
-        }
-        return 100.0f * count / 3.0f;
-    }
-
-    float rawLogStdMin(float[] logStds) {
-        float v = Float.POSITIVE_INFINITY;
-        for (int i = 0; i < 3; i++) v = min(v, logStds[i]);
-        return v;
-    }
-
-    float rawLogStdMax(float[] logStds) {
-        float v = Float.NEGATIVE_INFINITY;
-        for (int i = 0; i < 3; i++) v = max(v, logStds[i]);
-        return v;
-    }
-
-    float logStdBelowMinGap(float[] logStds) {
-        float gap = 0;
-        for (int i = 0; i < 3; i++) gap = max(gap, policy.logStdMin(i) - logStds[i]);
-        return max(0, gap);
-    }
-
-    float logStdAboveMaxGap(float[] logStds) {
-        float gap = 0;
-        for (int i = 0; i < 3; i++) gap = max(gap, logStds[i] - policy.logStdMax(i));
-        return max(0, gap);
-    }
-
-    // Physics simulation. Sets shotsRemainingAfter so FinalScoreHeuristic knows depth.
-    ShotResult simulateShot(Shot shot, ArrayList<Stone> layout, int shotsRemainingAfter) {
-        ArrayList<Stone> before    = copyLayout(layout);
+    ShotResult simulateShot(Shot shot, ArrayList<Stone> layout) {
+        ArrayList<Stone> before = copyLayout(layout);
         ArrayList<Stone> simStones = copyLayout(layout);
         ScoreResult scoreBefore = house.scoreEnd(simStones);
 
@@ -310,13 +129,13 @@ class PolicyGradientTraining {
         for (int step = 0; step < 100000; step++) {
             physics.step(simStones, DT);
             boolean anyMoving = false;
-            for (Stone s : simStones) if (s.isMoving()) { anyMoving = true; break; }
+            for (Stone s : simStones) {
+                if (s.isMoving()) { anyMoving = true; break; }
+            }
             if (!anyMoving) break;
         }
 
-        ShotResult result = new ShotResult(simStones, before, fired, scoreBefore, shot);
-        result.shotsRemainingAfter = shotsRemainingAfter;
-        return result;
+        return new ShotResult(simStones, before, fired, scoreBefore, shot);
     }
 
     private ArrayList<Stone> copyLayout(ArrayList<Stone> layout) {

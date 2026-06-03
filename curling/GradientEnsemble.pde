@@ -1,7 +1,6 @@
-// Ensemble of 8 specialised policy gradient experts, each trained with its own heuristic list and curriculum.
-// Each expert has its own limitations for curl, speed and angle, limiting it to only a certain type of shot.
+// Ensemble of 8 specialised experts. Each expert predicts one kind of shot.
 //
-// Expert index mapping (used by ShotTypeSelector):
+// Expert index mapping:
 //   0 Draw         1 DrawCurlR  2 DrawCurlL
 //   3 CurlR        4 CurlL      5 Takeout
 //   6 Guard        7 Freeze
@@ -10,15 +9,7 @@ class GradientEnsemble {
     PolicyGradientTraining[] trainers;
     ArrayList<Heuristic>[] typeHeuristics;
     int count;
-    PolicyDiagnostics diagnostics = new PolicyDiagnostics();
     FinalScoreHeuristic finalHeuristic = new FinalScoreHeuristic();
-    float[] lastAdjustedSelectorProbs;
-    float[] lastRolloutRankProbs;
-    float[] lastFinalDecisionProbs;
-    float[] lastDecisionScores;
-    float[] lastRolloutScores;
-    float[] lastTypeScores;
-    boolean[] lastDecisionCandidates;
 
     GradientEnsemble() {
         NeuralPolicy seed = new NeuralPolicy();
@@ -29,14 +20,14 @@ class GradientEnsemble {
             "Guard", "Freeze"
         };
         NeuralPolicy[] seeds = {
-            seed.expertDraw(true),
-            seed.expertDrawCurlRight(true),
-            seed.expertDrawCurlLeft(true),
-            seed.expertCurlRight(true),
-            seed.expertCurlLeft(true),
-            seed.expertTakeout(true),
-            seed.expertGuard(true),
-            seed.expertFreeze(true)
+            seed.expertDraw(),
+            seed.expertDrawCurlRight(),
+            seed.expertDrawCurlLeft(),
+            seed.expertCurlRight(),
+            seed.expertCurlLeft(),
+            seed.expertTakeout(),
+            seed.expertGuard(),
+            seed.expertFreeze()
         };
         count = seeds.length;
         trainers = new PolicyGradientTraining[count];
@@ -45,7 +36,6 @@ class GradientEnsemble {
             trainers[i].expertName = names[i];
         }
 
-        // Per-type heuristic lists (finalHeuristic appended to all)
         typeHeuristics = new ArrayList[count];
         DrawHeuristic    drawH    = new DrawHeuristic();
         CurlHeuristic    curlH    = new CurlHeuristic();
@@ -56,28 +46,20 @@ class GradientEnsemble {
         for (int i = 0; i < count; i++) {
             typeHeuristics[i] = new ArrayList<Heuristic>();
         }
-        // Draw, DrawCurlR, DrawCurlL
         typeHeuristics[0].add(drawH);
         typeHeuristics[1].add(drawH);
         typeHeuristics[2].add(drawH);
-        // CurlR, CurlL
         typeHeuristics[3].add(curlH);
         typeHeuristics[4].add(curlH);
-        // Takeout
         typeHeuristics[5].add(takeoutH);
-        // Guard
         typeHeuristics[6].add(guardH);
-        // Freeze
         typeHeuristics[7].add(freezeH);
 
-        // Append FinalScoreHeuristic to every expert's list
         for (int i = 0; i < count; i++) {
             typeHeuristics[i].add(finalHeuristic);
         }
     }
 
-    // Train all experts. Each draws its own random depth from the curriculum cap.
-    // Depth is how many stones are left to play in the game. Lower depth = closer to the end of the game, higher = closer to the beginning.
     void trainAll(int depthCap, int shotsPerUpdate) {
         for (int i = 0; i < count; i++) {
             int depth = max(1, (int) random(1, depthCap + 1));
@@ -90,147 +72,143 @@ class GradientEnsemble {
         for (int i = 0; i < count; i++) trainers[i].reset();
     }
 
-    // Use the selector to filter likely expert types, then evaluate their mean shots
-    // with final-score rollout and pick the best deterministic action.
     Shot bestShot(ArrayList<Stone> layout, int stonesLeft, int lastTeam,
+                  int remainingShotsAfterCurrent,
                   ShotTypeSelector selector, boolean logScores, boolean sampleMode) {
-        // Get the state representation from any expert (they should all be the same).
-        NeuralPolicy refPolicy = trainers[0].policy;
-        float[] state = refPolicy.convertState(layout, stonesLeft, lastTeam);
+        int chosen = 0;
+        Shot best = null;
+        float bestUtility = Float.NEGATIVE_INFINITY;
+        float[] probs = selectorProbs(layout, stonesLeft, lastTeam, selector);
+        int[] candidates = topExperts(probs, min(PLAY_CANDIDATE_EXPERTS, count));
 
-        int chosen;
-        float[] probs = new float[count];
-
-        // If a selector is provided, use it to get probabilities for each expert. Otherwise, assume uniform probabilities.
-        if (selector != null) {
-            probs = selector.probs(state);
-        } else {
-            for (int i = 0; i < count; i++) probs[i] = 1.0f / count;
-        }
-
-        if (USE_ROLLOUT_DECISION) {
-            chosen = chooseByRollout(layout, stonesLeft, lastTeam, probs, selector);
-        } else if (selector != null) {
-            if (sampleMode) {
-                chosen = selector.sampleFromProbs(probs);
-            } else if (TEST_TOP_K_ENABLED) {
-                chosen = selector.sampleTopKFromProbs(probs, TEST_TOP_K_EPS);
-            } else {
-                chosen = selector.argmaxFromProbs(probs);
+        for (int i = 0; i < candidates.length; i++) {
+            int expertIdx = candidates[i];
+            Shot shot = expertMeanShot(expertIdx, layout, stonesLeft, lastTeam);
+            float utility = averageUtilityAfterShot(shot, layout,
+                                                    remainingShotsAfterCurrent,
+                                                    selector);
+            if (utility > bestUtility) {
+                bestUtility = utility;
+                chosen = expertIdx;
+                best = shot;
             }
-        } else {
-            chosen = 0;
         }
-
-        Shot best = expertMeanShot(chosen, layout, stonesLeft, lastTeam);
 
         if (logScores) {
-            String mode = sampleMode ? "PLAY" : "TEST";
-            String selectorMode = USE_ROLLOUT_DECISION ? "ROLLOUT_BEST"
-                                : (sampleMode ? "SAMPLE"
-                                : (TEST_TOP_K_ENABLED ? "TEST_TOP_K" : "ARGMAX"));
-            diagnostics.logEnsembleInference(this, probs, chosen,
-                layout, stonesLeft, lastTeam, best, mode, selectorMode);
+            String mode = sampleMode ? "sample" : "deterministic";
+            println("NN shot (" + mode + "): " + names[chosen]
+                + " EU=" + nf(bestUtility, 0, 3)
+                + " curl=" + nf(best.curl, 0, 3)
+                + " speed=" + nf(best.speed, 0, 1)
+                + " angle=" + nf(degrees(best.angle), 0, 1));
         }
         return best;
     }
 
-    int chooseByRollout(ArrayList<Stone> layout, int stonesLeft, int lastTeam,
-                        float[] probs, ShotTypeSelector selector) {
-        lastAdjustedSelectorProbs = selector != null
-            ? selector.relativeOdds(probs)
-            : uniformProbs(count);
-        lastRolloutRankProbs = new float[count];
-        lastFinalDecisionProbs = new float[count];
-        lastDecisionScores = new float[count];
-        lastRolloutScores = new float[count];
-        lastTypeScores = new float[count];
-        lastDecisionCandidates = new boolean[count];
+    NeuralPolicy anyPolicy() {
+        return trainers[0].policy;
+    }
 
-        int fallback = argmaxArray(probs);
-        int chosen = fallback;
-        for (int i = 0; i < count; i++) {
-            Shot shot = expertMeanShot(i, layout, stonesLeft, lastTeam);
-            ShotResult result = simulateCandidateShot(shot, layout, rolloutShotsRemainingAfter(stonesLeft));
-            lastRolloutScores[i] = finalHeuristic.contribute(finalHeuristic.scoreResult(result));
-            lastTypeScores[i] = typeHeuristicScore(i, result);
+    Shot expertMeanShot(int expertIdx, ArrayList<Stone> layout, int stonesLeft, int lastTeam) {
+        NeuralPolicy p = trainers[expertIdx].policy;
+        float[] state = p.convertState(layout, stonesLeft, lastTeam);
+        return p.predictMean(state);
+    }
+
+    float[] selectorProbs(ArrayList<Stone> stateBoard, int stonesLeft, int lastTeam,
+                          ShotTypeSelector selector) {
+        if (selector == null) {
+            float[] uniform = new float[count];
+            for (int i = 0; i < count; i++) uniform[i] = 1.0f / count;
+            return uniform;
         }
+        float[] state = anyPolicy().convertState(stateBoard, stonesLeft, lastTeam);
+        return selector.probs(state);
+    }
 
-        assignTopFourRolloutOdds();
+    int[] topExperts(float[] probs, int limit) {
+        limit = max(1, min(limit, probs.length));
+        int[] result = new int[limit];
+        boolean[] used = new boolean[probs.length];
 
-        float bestScore = Float.NEGATIVE_INFINITY;
-        for (int i = 0; i < count; i++) {
-            lastFinalDecisionProbs[i] = DECISION_NN_WEIGHT * lastAdjustedSelectorProbs[i]
-                                      + DECISION_FINAL_SCORE_WEIGHT * lastRolloutRankProbs[i];
-            lastDecisionScores[i] = lastFinalDecisionProbs[i];
-            lastDecisionCandidates[i] = lastFinalDecisionProbs[i] > 0;
-
-            if (lastDecisionScores[i] > bestScore) {
-                bestScore = lastDecisionScores[i];
-                chosen = i;
+        for (int rank = 0; rank < limit; rank++) {
+            int bestIdx = 0;
+            float bestProb = Float.NEGATIVE_INFINITY;
+            for (int i = 0; i < probs.length; i++) {
+                if (!used[i] && probs[i] > bestProb) {
+                    bestProb = probs[i];
+                    bestIdx = i;
+                }
             }
+            result[rank] = bestIdx;
+            used[bestIdx] = true;
         }
-        if (bestScore <= 0) chosen = fallback;
-        return chosen;
+        return result;
     }
 
-    void assignTopFourRolloutOdds() {
-        int[] order = rankedIndices(lastRolloutScores);
-        float[] weights = { 0.50f, 0.25f, 0.125f, 0.125f };
-        for (int rank = 0; rank < min(4, order.length); rank++) {
-            lastRolloutRankProbs[order[rank]] = weights[rank];
+    float averageUtilityAfterShot(Shot candidate, ArrayList<Stone> layout,
+                                  int remainingShotsAfterCurrent,
+                                  ShotTypeSelector selector) {
+        int sims = max(1, SIMS_PER_EXPERT_SHOT);
+        float total = 0;
+        for (int i = 0; i < sims; i++) {
+            total += expectedUtilityAfterShot(candidate, layout,
+                                              remainingShotsAfterCurrent,
+                                              selector);
         }
+        return total / sims;
     }
 
-    int[] rankedIndices(float[] values) {
-        int[] idx = new int[values.length];
-        for (int i = 0; i < values.length; i++) idx[i] = i;
-        for (int i = 1; i < idx.length; i++) {
-            int key = idx[i];
-            int j = i - 1;
-            while (j >= 0 && values[idx[j]] < values[key]) {
-                idx[j + 1] = idx[j];
-                j--;
-            }
-            idx[j + 1] = key;
+    float expectedUtilityAfterShot(Shot candidate, ArrayList<Stone> layout,
+                                   int remainingShotsAfterCurrent,
+                                   ShotTypeSelector selector) {
+        ArrayList<Stone> afterCandidate = simulateOneShot(layout, candidate, TEAM_YELLOW);
+        int remainingShots = max(0, remainingShotsAfterCurrent);
+        if (remainingShots == 0) {
+            return house.scoreEnd(afterCandidate).yellowFitness();
         }
-        return idx;
+
+        return expectedUtilityOfNextShot(afterCandidate, remainingShots, selector);
     }
 
-    float[] uniformProbs(int n) {
-        float[] p = new float[n];
-        for (int i = 0; i < n; i++) p[i] = 1.0f / max(1, n);
-        return p;
-    }
+    float expectedUtilityOfNextShot(ArrayList<Stone> boardAfterYellow,
+                                    int remainingShots,
+                                    ShotTypeSelector selector) {
+        int nextTeam = TEAM_RED;
+        int stonesLeft = max(1, (int) ceil(remainingShots / 2.0));
 
-    int argmaxArray(float[] values) {
-        int best = 0;
-        for (int i = 1; i < values.length; i++) {
-            if (values[i] > values[best]) best = i;
+        ArrayList<Stone> selectorBoard = flipTeams(boardAfterYellow);
+        float[] probs = selectorProbs(selectorBoard, stonesLeft, TEAM_YELLOW, selector);
+        int[] nextExperts = topExperts(probs, min(NEXT_UTILITY_EXPERTS, count));
+
+        float probSum = 0;
+        for (int i = 0; i < nextExperts.length; i++) {
+            probSum += max(0, probs[nextExperts[i]]);
         }
-        return best;
-    }
+        boolean useUniformWeights = probSum <= 0;
 
-    float typeHeuristicScore(int expertIdx, ShotResult result) {
-        float score = 0;
-        for (Heuristic h : typeHeuristics[expertIdx]) {
-            if (h instanceof FinalScoreHeuristic) continue;
-            score += h.contribute(h.scoreResult(result));
+        float expected = 0;
+        for (int i = 0; i < nextExperts.length; i++) {
+            int expertIdx = nextExperts[i];
+            float weight = useUniformWeights
+                ? 1.0f / nextExperts.length
+                : max(0, probs[expertIdx]) / probSum;
+
+            Shot nextShot = expertMeanShot(expertIdx, selectorBoard,
+                                           stonesLeft, TEAM_YELLOW);
+            ArrayList<Stone> afterNext = simulateOneShot(boardAfterYellow,
+                                                         nextShot, nextTeam);
+            float utility = house.scoreEnd(afterNext).yellowFitness();
+            expected += weight * utility;
         }
-        return score;
+        return expected;
     }
 
-    int rolloutShotsRemainingAfter(int stonesLeft) {
-        return max(0, (stonesLeft - 1) * 2);
-    }
-
-    ShotResult simulateCandidateShot(Shot shot, ArrayList<Stone> layout, int shotsRemainingAfter) {
-        ArrayList<Stone> before    = copyLayout(layout);
+    ArrayList<Stone> simulateOneShot(ArrayList<Stone> layout, Shot shot, int team) {
         ArrayList<Stone> simStones = copyLayout(layout);
-        ScoreResult scoreBefore = house.scoreEnd(simStones);
 
         PVector h = sheet.hackWorld();
-        Stone fired = new Stone(h.x, h.y, TEAM_YELLOW);
+        Stone fired = new Stone(h.x, h.y, team);
         fired.curl = constrain(shot.curl, -1, 1);
         fired.vel.set(sin(shot.angle) * shot.speed, cos(shot.angle) * shot.speed);
         simStones.add(fired);
@@ -238,13 +216,12 @@ class GradientEnsemble {
         for (int step = 0; step < 100000; step++) {
             physics.step(simStones, DT);
             boolean anyMoving = false;
-            for (Stone s : simStones) if (s.isMoving()) { anyMoving = true; break; }
+            for (Stone s : simStones) {
+                if (s.isMoving()) { anyMoving = true; break; }
+            }
             if (!anyMoving) break;
         }
-
-        ShotResult result = new ShotResult(simStones, before, fired, scoreBefore, shot);
-        result.shotsRemainingAfter = shotsRemainingAfter;
-        return result;
+        return simStones;
     }
 
     ArrayList<Stone> copyLayout(ArrayList<Stone> layout) {
@@ -257,12 +234,14 @@ class GradientEnsemble {
         return copy;
     }
 
-    NeuralPolicy anyPolicy() { return trainers[0].policy; }
-
-    // Return the mean shot for expert i given the board state.
-    Shot expertMeanShot(int expertIdx, ArrayList<Stone> layout, int stonesLeft, int lastTeam) {
-        NeuralPolicy p = trainers[expertIdx].policy;
-        float[] state = p.convertState(layout, stonesLeft, lastTeam);
-        return p.predictMean(state);
+    ArrayList<Stone> flipTeams(ArrayList<Stone> board) {
+        ArrayList<Stone> flipped = new ArrayList<Stone>();
+        for (Stone s : board) {
+            Stone c = new Stone(s.pos.x, s.pos.y,
+                                s.team == TEAM_RED ? TEAM_YELLOW : TEAM_RED);
+            c.hogPassed = s.hogPassed;
+            flipped.add(c);
+        }
+        return flipped;
     }
 }

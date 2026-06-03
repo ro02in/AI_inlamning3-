@@ -7,74 +7,20 @@ class NeuralPolicy {
     final ActivationKind HIDDEN_ACTIVATION = ActivationKind.RELU;
     final ActivationKind OUTPUT_ACTIVATION = ActivationKind.TANH;
 
-    // Default output ranges (matches original predict() behaviour).
     static final float DEFAULT_MIN_CURL      = -1f;
     static final float DEFAULT_MAX_CURL      =  1f;
-    static final float DEFAULT_MIN_SPEED     = UI.SPEED_MAX * 0.3f; // 12 ft/s
-    static final float DEFAULT_MAX_SPEED     = UI.SPEED_MAX;        // 40 ft/s
+    static final float DEFAULT_MIN_SPEED     = UI.SPEED_MAX * 0.3f;
+    static final float DEFAULT_MAX_SPEED     = UI.SPEED_MAX;
     static final float DEFAULT_MIN_ANGLE_DEG = -10f;
     static final float DEFAULT_MAX_ANGLE_DEG =  10f;
 
-    // Ranges used by predict() / predictMean() to map tanh outputs.
     float minCurl, maxCurl;
     float minSpeed, maxSpeed;
     float minAngleDeg, maxAngleDeg;
-
-    // When true the policy outputs (μ, log σ) per action dimension and
-    // supports sample() for stochastic training.
-    boolean meanAndStd = false;
-    int lastLoadedUpdateCount = -1; // set by loadFromLines()
-
-    // Log-std clamp: σ = exp(logStd). Per-dimension minimum σ (in tanh space for curl/speed;
-    // angle min is converted from degrees using this policy's angle span).
-    static final float MIN_STD_CURL_TANH  = 0.15f;
-    static final float MIN_STD_SPEED_TANH = 0.20f;
-    static final float MIN_STD_ANGLE_DEG  = 0.50f;
-    static final float MAX_STD_CURL_TANH  = 1.00f;
-    static final float MAX_STD_SPEED_TANH = 0.80f;
-    static final float MAX_STD_ANGLE_TANH = 0.80f;
-
-    // Minimum σ in tanh space for action dimension i (0=curl, 1=speed, 2=angle).
-    float minStdTanh(int dim) {
-        if (dim == 0) return MIN_STD_CURL_TANH;
-        if (dim == 1) return MIN_STD_SPEED_TANH;
-        float span = max(1f, angleSpanDeg());
-        return MIN_STD_ANGLE_DEG / (0.5f * span);
-    }
-
-    float logStdMin(int dim) {
-        return log(minStdTanh(dim));
-    }
-
-    float maxStdTanh(int dim) {
-        if (dim == 0) return MAX_STD_CURL_TANH;
-        if (dim == 1) return MAX_STD_SPEED_TANH;
-        return MAX_STD_ANGLE_TANH;
-    }
-
-    float logStdMax(int dim) {
-        return log(maxStdTanh(dim));
-    }
-
-    float clampLogStd(int dim, float logStd) {
-        return constrain(logStd, logStdMin(dim), logStdMax(dim));
-    }
-
-    float sigmaFromLogStd(int dim, float logStd) {
-        return exp(clampLogStd(dim, logStd));
-    }
-
-    boolean logStdAtMin(int dim, float logStd) {
-        return logStd <= logStdMin(dim) + 1e-4f;
-    }
-
-    boolean logStdAtMax(int dim, float logStd) {
-        return logStd >= logStdMax(dim) - 1e-4f;
-    }
+    int lastLoadedUpdateCount = -1;
 
     NeuronLayer[] hiddenLayers;
-    NeuronLayer outputLayer;    // 3 neurons for deterministic policy or 3 mean neurons
-    NeuronLayer outputLogStd;   // 3 neurons (LINEAR) for log σ — only used when meanAndStd=true
+    NeuronLayer outputLayer;
 
     NeuralPolicy() {
         this(DEFAULT_MIN_CURL, DEFAULT_MAX_CURL,
@@ -85,118 +31,53 @@ class NeuralPolicy {
     NeuralPolicy(float minCurl, float maxCurl,
                 float minSpeed, float maxSpeed,
                 float minAngleDeg, float maxAngleDeg) {
-        this.minCurl      = minCurl;
-        this.maxCurl      = maxCurl;
-        this.minSpeed     = minSpeed;
-        this.maxSpeed     = maxSpeed;
-        this.minAngleDeg  = minAngleDeg;
-        this.maxAngleDeg  = maxAngleDeg;
+        this.minCurl = minCurl;
+        this.maxCurl = maxCurl;
+        this.minSpeed = minSpeed;
+        this.maxSpeed = maxSpeed;
+        this.minAngleDeg = minAngleDeg;
+        this.maxAngleDeg = maxAngleDeg;
         initializeHiddenLayers(defaultHiddenLayerCount);
         outputLayer = new NeuronLayer(outputSize, hiddenSize, OUTPUT_ACTIVATION);
     }
 
-    // Stochastic policy: outputs (μ, log σ) per action dimension.
-    // Output ranges are the full defaults; the model learns where to point.
-    NeuralPolicy(boolean meanAndStd) {
-        this(DEFAULT_MIN_CURL, DEFAULT_MAX_CURL,
-            DEFAULT_MIN_SPEED, DEFAULT_MAX_SPEED,
-            DEFAULT_MIN_ANGLE_DEG, DEFAULT_MAX_ANGLE_DEG,
-            meanAndStd);
-    }
-
-    NeuralPolicy(float minCurl, float maxCurl,
-                float minSpeed, float maxSpeed,
-                float minAngleDeg, float maxAngleDeg,
-                boolean meanAndStd) {
-        this.minCurl      = minCurl;
-        this.maxCurl      = maxCurl;
-        this.minSpeed     = minSpeed;
-        this.maxSpeed     = maxSpeed;
-        this.minAngleDeg  = minAngleDeg;
-        this.maxAngleDeg  = maxAngleDeg;
-        this.meanAndStd   = meanAndStd;
-        initializeHiddenLayers(defaultHiddenLayerCount);
-        outputLayer  = new NeuronLayer(outputSize, hiddenSize, OUTPUT_ACTIVATION);
-        if (meanAndStd) {
-            outputLogStd = new NeuronLayer(outputSize, hiddenSize, ActivationKind.LINEAR);
-        }
-    }
-
-    // ---- Expert factory constructors ----
-    // Pass meanAndStd=true for policy-gradient ensemble seeds (same output caps).
-
     NeuralPolicy expertDraw() {
-        return expertDraw(false);
-    }
-
-    NeuralPolicy expertDraw(boolean meanAndStd) {
-        return new NeuralPolicy(-0.1f, 0.1f, 18f, 26f, -3f, 3f, meanAndStd);
+        return new NeuralPolicy(-0.1f, 0.1f, 18f, 26f, -3f, 3f);
     }
 
     NeuralPolicy expertDrawCurlRight() {
-        return expertDrawCurlRight(false);
-    }
-
-    NeuralPolicy expertDrawCurlRight(boolean meanAndStd) {
-        return new NeuralPolicy(0.1f, 0.35f, 18f, 26f, -5f, 1f, meanAndStd);
+        return new NeuralPolicy(0.1f, 0.35f, 18f, 26f, -5f, 1f);
     }
 
     NeuralPolicy expertDrawCurlLeft() {
-        return expertDrawCurlLeft(false);
-    }
-
-    NeuralPolicy expertDrawCurlLeft(boolean meanAndStd) {
-        return new NeuralPolicy(-0.35f, -0.1f, 18f, 26f, -1f, 5f, meanAndStd);
+        return new NeuralPolicy(-0.35f, -0.1f, 18f, 26f, -1f, 5f);
     }
 
     NeuralPolicy expertCurlRight() {
-        return expertCurlRight(false);
-    }
-
-    NeuralPolicy expertCurlRight(boolean meanAndStd) {
-        return new NeuralPolicy(0.35f, 1f, 18f, 36f, -10f, 3f, meanAndStd);
+        return new NeuralPolicy(0.35f, 1f, 18f, 36f, -10f, 3f);
     }
 
     NeuralPolicy expertCurlLeft() {
-        return expertCurlLeft(false);
-    }
-
-    NeuralPolicy expertCurlLeft(boolean meanAndStd) {
-        return new NeuralPolicy(-1f, -0.35f, 18f, 36f, -3f, 10f, meanAndStd);
+        return new NeuralPolicy(-1f, -0.35f, 18f, 36f, -3f, 10f);
     }
 
     NeuralPolicy expertTakeout() {
-        return expertTakeout(false);
-    }
-
-    NeuralPolicy expertTakeout(boolean meanAndStd) {
-        return new NeuralPolicy(-0.5f, 0.5f, 26f, 40f, -8f, 8f, meanAndStd);
+        return new NeuralPolicy(-0.5f, 0.5f, 26f, 40f, -8f, 8f);
     }
 
     NeuralPolicy expertGuard() {
-        return expertGuard(false);
-    }
-
-    NeuralPolicy expertGuard(boolean meanAndStd) {
-        return new NeuralPolicy(-0.5f, 0.5f, 12f, 22f, -6f, 6f, meanAndStd);
+        return new NeuralPolicy(-0.5f, 0.5f, 12f, 22f, -6f, 6f);
     }
 
     NeuralPolicy expertFreeze() {
-        return expertFreeze(false);
+        return new NeuralPolicy(-0.2f, 0.2f, 14f, 27f, -5f, 5f);
     }
-
-    NeuralPolicy expertFreeze(boolean meanAndStd) {
-        return new NeuralPolicy(-0.2f, 0.2f, 14f, 27f, -5f, 5f, meanAndStd);
-    }
-
-    // ---- Forward pass helpers ----
 
     void initializeHiddenLayers(int count) {
         hiddenLayers = new NeuronLayer[max(1, count)];
         int previousSize = inputSize;
         for (int i = 0; i < hiddenLayers.length; i++) {
-            hiddenLayers[i] = new NeuronLayer(hiddenSize, previousSize,
-                                              HIDDEN_ACTIVATION, NormKind.LAYERNORM);
+            hiddenLayers[i] = new NeuronLayer(hiddenSize, previousSize, HIDDEN_ACTIVATION);
             previousSize = hiddenSize;
         }
     }
@@ -209,9 +90,9 @@ class NeuralPolicy {
         return values;
     }
 
-    NeuronLayer lastHiddenLayer() {
-        if (hiddenLayers == null || hiddenLayers.length == 0) return null;
-        return hiddenLayers[hiddenLayers.length - 1];
+    float[] rawOutput(float[] state) {
+        float[] hiddenOutputs = feedForwardHidden(state);
+        return outputLayer.feedForward(hiddenOutputs);
     }
 
     void appendLoadedHiddenLayer(NeuronLayer layer) {
@@ -227,91 +108,36 @@ class NeuralPolicy {
         return lo + (tanhOut + 1f) * 0.5f * (hi - lo);
     }
 
-    float angleSpanDeg() {
-        return maxAngleDeg - minAngleDeg;
+    float mapRangeToTanh(float value, float lo, float hi) {
+        if (abs(hi - lo) < 1e-6f) return 0;
+        return constrain(((value - lo) / (hi - lo)) * 2f - 1f, -1f, 1f);
     }
 
-    float angleSpanRad() {
-        return radians(angleSpanDeg());
+    Shot shotFromRaw(float[] raw) {
+        float curl = mapTanhToRange(constrain(raw[0], -1f, 1f), minCurl, maxCurl);
+        float speed = mapTanhToRange(constrain(raw[1], -1f, 1f), minSpeed, maxSpeed);
+        float angle = mapTanhToRange(constrain(raw[2], -1f, 1f), minAngleDeg, maxAngleDeg);
+        return new Shot(curl, speed, radians(angle));
     }
 
-    // Deterministic prediction. For a meanAndStd policy this returns the mean shot.
+    float[] rawFromShot(Shot shot) {
+        return new float[]{
+            mapRangeToTanh(shot.curl, minCurl, maxCurl),
+            mapRangeToTanh(shot.speed, minSpeed, maxSpeed),
+            mapRangeToTanh(degrees(shot.angle), minAngleDeg, maxAngleDeg)
+        };
+    }
+
     Shot predict(float[] state) {
-        float[] hiddenOutputs = feedForwardHidden(state);
-        float[] outputValues  = outputLayer.feedForward(hiddenOutputs);
-
-        float curl  = mapTanhToRange(outputValues[0], minCurl, maxCurl);
-        float speed = mapTanhToRange(outputValues[1], minSpeed, maxSpeed);
-        float angle = mapTanhToRange(outputValues[2], minAngleDeg, maxAngleDeg);
-        angle = radians(angle);
-        return new Shot(curl, speed, angle);
+        return shotFromRaw(rawOutput(state));
     }
 
-    // Alias for clarity when using a meanAndStd policy in play mode.
     Shot predictMean(float[] state) {
         return predict(state);
     }
 
-    // Stochastic sample for play/exploration (e.g. during AI test).
-    // Runs a fresh forward pass, so it is NOT used inside PolicyGradientTraining.updateStep()
-    // (which does its own single forward pass to preserve the stored layer state for backprop).
-    Shot sample(float[] state) {
-        if (!meanAndStd) return predict(state);
-
-        float[] hidden  = feedForwardHidden(state);
-        float[] means   = outputLayer.feedForward(hidden);
-        float[] logStds = outputLogStd.feedForward(hidden);
-
-        float[] actions = new float[3];
-        for (int i = 0; i < 3; i++) {
-            float sigma  = sigmaFromLogStd(i, logStds[i]);
-            actions[i]   = constrain(means[i] + sigma * randomGaussian(), -1f, 1f);
-        }
-
-        float curl  = mapTanhToRange(actions[0], minCurl, maxCurl);
-        float speed = mapTanhToRange(actions[1], minSpeed, maxSpeed);
-        float angle = mapTanhToRange(actions[2], minAngleDeg, maxAngleDeg);
-        return new Shot(curl, speed, radians(angle));
-    }
-
-    // Compute gradients of log π(action|state) w.r.t. network outputs (means and log-stds)
-    // for one sampled action. Returns float[6]: [dLogP/dMean0..2, dLogP/dLogStd0..2].
-    // The caller multiplies by advantage and sums across samples before backpropping.
-    float[] logProbGradients(float[] means, float[] logStds, float[] actionRaw) {
-        float[] grad = new float[6];
-        for (int i = 0; i < 3; i++) {
-            float sigma  = sigmaFromLogStd(i, logStds[i]);
-            float sigma2 = sigma * sigma;
-            float diff   = actionRaw[i] - means[i];
-
-            // d log N(a; μ, σ) / dμ  = (a - μ) / σ²
-            grad[i]     = diff / sigma2;
-            // d log N(a; μ, σ) / d(log σ) = (a - μ)² / σ² - 1
-            grad[3 + i] = (diff * diff) / sigma2 - 1.0f;
-        }
-        return grad;
-    }
-
-    // Backpropagate a gradient vector through the stochastic policy.
-    // gradMean[3]: gradient w.r.t. mean output neurons (post-tanh) — sign convention: positive = increase
-    // gradLogStd[3]: gradient w.r.t. log-std output neurons
-    // Caller has already scaled gradients by advantage and learning rate direction.
-    void backwardMeanAndStd(float[] gradMean, float[] gradLogStd, float lr) {
-        if (!meanAndStd) return;
-
-        // Backward through log-std head → get gradient w.r.t. hidden layer.
-        float[] gradHiddenFromLogStd = outputLogStd.backward(gradLogStd, lr);
-
-        // Backward through mean head → get gradient w.r.t. hidden layer.
-        float[] gradHiddenFromMean = outputLayer.backward(gradMean, lr);
-
-        // Sum the two gradient signals into the hidden layer.
-        float[] gradHidden = new float[hiddenSize];
-        for (int i = 0; i < hiddenSize; i++) {
-            gradHidden[i] = gradHiddenFromMean[i] + gradHiddenFromLogStd[i];
-        }
-
-        // Backward through hidden layers in reverse order (input gradient discarded).
+    void backwardOutput(float[] gradOutput, float lr) {
+        float[] gradHidden = outputLayer.backward(gradOutput, lr);
         for (int i = hiddenLayers.length - 1; i >= 0; i--) {
             gradHidden = hiddenLayers[i].backward(gradHidden, lr);
         }
@@ -320,9 +146,6 @@ class NeuralPolicy {
     void clipWeights() {
         for (NeuronLayer layer : hiddenLayers) layer.clipAll();
         outputLayer.clipAll();
-        if (meanAndStd && outputLogStd != null) {
-            outputLogStd.clipAll();
-        }
     }
 
     float[] convertState(ArrayList<Stone> playedStones, int stonesLeft, int lastStoneTeam) {
@@ -332,7 +155,7 @@ class NeuralPolicy {
             if (slot < playedStones.size()) {
                 Stone s = playedStones.get(slot);
                 state[i++] = (s.pos.x - sheet.centerX) / (sheet.SHEET_WIDTH_FT * 0.5);
-                state[i++] = (s.pos.y - sheet.hogY) / (sheet.backFarY - sheet.hogY);
+                state[i++] = (s.pos.y - sheet.teeY) / (sheet.backFarY - sheet.teeY);
                 state[i++] = s.team == TEAM_RED ? 1 : -1;
                 state[i++] = 1;
             } else {
@@ -347,11 +170,8 @@ class NeuralPolicy {
         return state;
     }
 
-    // ---- File I/O ----
-
     void appendSave(StringBuilder sb, String expertName, int updateCount) {
         sb.append("@policy ").append(expertName).append('\n');
-        sb.append("mean_and_std=").append(meanAndStd ? 1 : 0).append('\n');
         sb.append("min_curl=").append(minCurl).append('\n');
         sb.append("max_curl=").append(maxCurl).append('\n');
         sb.append("min_speed=").append(minSpeed).append('\n');
@@ -365,18 +185,13 @@ class NeuralPolicy {
             hiddenLayers[i].appendSave(sb, "hidden" + (i + 1));
         }
         outputLayer.appendSave(sb, "output");
-        if (meanAndStd && outputLogStd != null) {
-            outputLogStd.appendSave(sb, "logstd");
-        }
         sb.append("@end\n");
     }
 
-    // Load one @policy ... @end block starting at lines[startIdx]. Returns index after @end.
     int loadFromLines(String[] lines, int startIdx) {
         int idx = startIdx;
         if (idx >= lines.length || !trim(lines[idx]).startsWith("@policy ")) return startIdx;
 
-        boolean meanStdFlag = meanAndStd;
         float mc = minCurl, xc = maxCurl;
         float ms = minSpeed, xs = maxSpeed;
         float ma = minAngleDeg, xa = maxAngleDeg;
@@ -395,14 +210,13 @@ class NeuralPolicy {
             String key = line.substring(0, eq);
             String val = line.substring(eq + 1);
 
-            if      (key.equals("mean_and_std"))   meanStdFlag = parseInt(val) != 0;
-            else if (key.equals("min_curl"))       mc = parseFloat(val);
-            else if (key.equals("max_curl"))       xc = parseFloat(val);
-            else if (key.equals("min_speed"))      ms = parseFloat(val);
-            else if (key.equals("max_speed"))      xs = parseFloat(val);
-            else if (key.equals("min_angle_deg"))  ma = parseFloat(val);
-            else if (key.equals("max_angle_deg"))  xa = parseFloat(val);
-            else if (key.equals("update_count"))   lastLoadedUpdateCount = parseInt(val);
+            if      (key.equals("min_curl"))      mc = parseFloat(val);
+            else if (key.equals("max_curl"))      xc = parseFloat(val);
+            else if (key.equals("min_speed"))     ms = parseFloat(val);
+            else if (key.equals("max_speed"))     xs = parseFloat(val);
+            else if (key.equals("min_angle_deg")) ma = parseFloat(val);
+            else if (key.equals("max_angle_deg")) xa = parseFloat(val);
+            else if (key.equals("update_count"))  lastLoadedUpdateCount = parseInt(val);
             idx++;
         }
 
@@ -412,12 +226,6 @@ class NeuralPolicy {
         maxSpeed = xs;
         minAngleDeg = ma;
         maxAngleDeg = xa;
-        meanAndStd = meanStdFlag;
-        if (meanAndStd && outputLogStd == null) {
-            outputLogStd = new NeuronLayer(outputSize, hiddenSize, ActivationKind.LINEAR);
-        } else if (!meanAndStd) {
-            outputLogStd = null;
-        }
 
         hiddenLayers = new NeuronLayer[0];
         while (idx < lines.length) {
@@ -432,10 +240,6 @@ class NeuralPolicy {
                 NeuronLayer loaded = new NeuronLayer(1, 1);
                 idx = loaded.loadSelf(lines, idx);
                 outputLayer = loaded;
-            } else if (line.startsWith("@layer logstd")) {
-                NeuronLayer loaded = new NeuronLayer(1, 1);
-                idx = loaded.loadSelf(lines, idx);
-                outputLogStd = loaded;
             } else {
                 idx++;
             }

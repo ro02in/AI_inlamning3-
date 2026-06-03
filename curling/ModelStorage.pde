@@ -1,7 +1,7 @@
-// Save / load trained NeuralPolicy weights + ShotTypeSelector.
+// Save / load deterministic NeuralPolicy weights + ShotTypeSelector.
 // File format: text .curlmodel with header + @policy blocks + @selector block.
 class ModelStorage {
-    static final String FORMAT_VERSION = "curling_model_v3";
+    static final String FORMAT_VERSION = "curling_model_simple_v1";
     static final String DEFAULT_DIR    = "data/models";
 
     String lastMessage = "";
@@ -40,6 +40,11 @@ class ModelStorage {
         String[] lines = loadStrings(path);
         if (lines == null || lines.length == 0) {
             lastMessage = "Kunde inte lasa: " + path;
+            return false;
+        }
+        if (!trim(lines[0]).equals(FORMAT_VERSION)) {
+            lastMessage = "Fel modellformat. Skapa en ny modell med den forenklade AI:n.";
+            println(lastMessage);
             return false;
         }
 

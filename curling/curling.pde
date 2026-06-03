@@ -62,7 +62,6 @@ GradientEnsemble gradientEnsemble;
 ShotTypeSelector shotSelector;
 SelfPlayRollout  selfPlayRollout;
 
-TrainingPreview    trainingPreview;
 PolicyDiagnostics  policyDiagnostics;
 ModelStorage       modelStorage;
 
@@ -107,15 +106,9 @@ void setup() {
   selfPlayRollout   = new SelfPlayRollout();
   gradientEnsemble  = new GradientEnsemble();
   shotSelector      = new ShotTypeSelector(gradientEnsemble);
-  trainingPreview   = new TrainingPreview();
   policyDiagnostics = new PolicyDiagnostics();
   modelStorage      = new ModelStorage();
 
-}
-
-// Representative policy for training preview.
-NeuralPolicy activePolicy() {
-  return gradientEnsemble.anyPolicy();
 }
 
 // Compute the curriculum depth cap from training progress.
@@ -147,15 +140,12 @@ void draw() {
       gradientEnsemble.trainAll(depthCap, SHOTS_PER_ROUND);
       shotSelector.updateStep(depthCap);
       trainingDone++;
-      trainingPreview.recordSnapshot(trainingDone, activePolicy());
       if (trainingDone >= trainingTarget) {
         trainingActive = false;
         appMode = AppMode.PLAY;
         trainingStatus = "Klar! (" + trainingDone + " steg)";
-        trainingPreview.reset();
       }
     }
-    trainingPreview.update(DT);
   } else if (appMode == AppMode.TEST) {
     updateAiTest();
     ui.update(DT);
@@ -171,8 +161,6 @@ void draw() {
     if (aiTestLastShot != null) drawShotPreview(aiTestLastShot, color(235, 205, 60));
     for (Stone s : aiTestStones) s.draw();
     drawAiTestOverlay();
-  } else if (appMode == AppMode.TRAINING) {
-    trainingPreview.drawStones();
   } else {
     if (game.state == GameState.AIMING && game.currentTeam == TEAM_RED) {
       drawAimPreview(ui.intendedShot());
@@ -184,14 +172,12 @@ void draw() {
 
   drawSidebarBackdrop();
   ui.draw();
-  if (appMode == AppMode.TRAINING) trainingPreview.drawOverlay(trainingDone, trainingTarget);
 }
 void startTraining(int comparisons) {
   if (trainingActive) return;
   trainingTarget = trainingDone + comparisons;
   trainingActive = true;
   trainingStatus = "";
-  trainingPreview.reset();
   appMode        = AppMode.TRAINING;
 }
 
@@ -200,7 +186,6 @@ void cancelTraining() {
   trainingActive = false;
   appMode        = AppMode.PLAY;
   trainingStatus = "Avbruten (" + trainingDone + " jamf.)";
-  trainingPreview.reset();
 }
 
 void resetTrainingModel() {
@@ -230,7 +215,7 @@ void onSaveModelSelected(File selection) {
 
 void promptLoadModel() {
   if (trainingActive || appMode == AppMode.TRAINING) return;
-  selectInput("Ladda modell", "onLoadModelSelected");
+  selectInput("Ladda modell", "onLoadModelSelected", modelStorage.modelDir());
 }
 
 void onLoadModelSelected(File selection) {

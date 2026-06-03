@@ -223,7 +223,8 @@ class UI {
   Button     shootBtn;
   Button     resetGameBtn;
   Button     startPlayerBtn;
-  Button     rndStateBtn;
+  Button     saveModelBtn;
+  Button     loadModelBtn;
   Button     trainBtn;
   Button     testBtn;
   Button     RndSampBtn;
@@ -236,8 +237,9 @@ class UI {
   final int  TRAIN_MAX = 1000000;
   final float STATS_TOP    =  16;
   final float STATS_BOTTOM = 108;
-  final float GAME_BTN_TOP     = 136;
-  final float EXTRA_BTN_TOP    = 194;
+  final float GAME_BTN_TOP     = 122;
+  final float MODEL_BTN_TOP    = 154;
+  final float EXTRA_BTN_TOP    = 186;
   final float TRAIN_BAR_Y      = 276;
   final float TRAIN_BAR_H      = 10;
   final float AI_STATUS_Y      = 290;
@@ -279,32 +281,27 @@ class UI {
 
     float btnW    = SIDEBAR_W - 40;
     float halfW   = (btnW - 6) * 0.5f;
-    float thirdW  = (btnW - 6 * 2) / 3.0f;
     float quarterW = (btnW - 6 * 3) / 4.0f;
     float halfX   = ICE_W + (SIDEBAR_W - btnW) * 0.5f;
 
     shootBtn = new Button("L\u00e5s vinkel", halfX, BTN_TOP, btnW, 52);
     resetGameBtn = new Button("Ny match", halfX, GAME_BTN_TOP, halfW, 28);
     startPlayerBtn = new Button("Start: Rod", halfX + halfW + 6, GAME_BTN_TOP, halfW, 28);
+    saveModelBtn = new Button("Spara", halfX, MODEL_BTN_TOP, halfW, 28);
+    loadModelBtn = new Button("Ladda", halfX + halfW + 6, MODEL_BTN_TOP, halfW, 28);
 
     trainBtn = new Button("Trana",    halfX,          TRAIN_BTN_TOP, halfW, 40);
     testBtn  = new Button("Testa AI", halfX + halfW + 6, TRAIN_BTN_TOP, halfW, 40);
 
-
-    rndStateBtn = new Button("Slump",
-                               halfX,
-                               EXTRA_BTN_TOP,
-                               thirdW, 36);
-
     RndSampBtn  = new Button("MC AI",
                                halfX,
                                EXTRA_BTN_TOP,
-                               halfW, 36);
+                               halfW, 28);
 
     NNBtn       = new Button("NN",
                                halfX + halfW + 6,
                                EXTRA_BTN_TOP,
-                               halfW, 36);
+                               halfW, 28);
 
     float expertGap    = 6;
     float expertThirdW = (btnW - expertGap * 2) / 3.0f;
@@ -396,6 +393,11 @@ class UI {
     startPlayerBtn.label   = game.startingTeam == TEAM_RED ? "Start: Rod" : "Start: Gul";
     startPlayerBtn.enabled = true;
     startPlayerBtn.draw();
+
+    saveModelBtn.enabled = controlsEnabled;
+    saveModelBtn.draw();
+    loadModelBtn.enabled = controlsEnabled;
+    loadModelBtn.draw();
 
     RndSampBtn.enabled  = controlsEnabled && appMode == AppMode.PLAY;
     RndSampBtn.selected = (activeAiType == 1);
@@ -575,7 +577,6 @@ class UI {
   void resetGameNow() {
     if (trainingActive) {
       trainingActive = false;
-      trainingPreview.reset();
     }
     if (appMode == AppMode.TEST) stopAiTest();
     appMode = AppMode.PLAY;
@@ -596,6 +597,8 @@ class UI {
   void onMousePressed(float mx, float my) {
     if (resetGameBtn.enabled && resetGameBtn.hits(mx, my)) { resetGameNow(); return; }
     if (startPlayerBtn.enabled && startPlayerBtn.hits(mx, my)) { toggleStartingPlayer(); return; }
+    if (saveModelBtn.enabled && saveModelBtn.hits(mx, my)) { promptSaveModel(); return; }
+    if (loadModelBtn.enabled && loadModelBtn.hits(mx, my)) { promptLoadModel(); return; }
 
     if (trainBtn.enabled      && trainBtn.hits(mx, my))      {
       if (trainingActive) cancelTraining(); else startTraining(trainComparisons); return;
@@ -609,7 +612,6 @@ class UI {
       return;
     }
     if (shootBtn.enabled && shootBtn.hits(mx, my)) { triggerAction(); return; }
-    if (rndStateBtn.enabled && rndStateBtn.hits(mx, my)) { setRndStones(); return; }
     if (RndSampBtn.enabled && RndSampBtn.hits(mx, my)) { activeAiType = 1; return; }
     if (NNBtn.enabled      && NNBtn.hits(mx, my))      { activeAiType = 2; return; }
 
@@ -636,9 +638,10 @@ class UI {
     shootBtn.hover      = shootBtn.hits(mx, my);
     resetGameBtn.hover  = resetGameBtn.hits(mx, my);
     startPlayerBtn.hover = startPlayerBtn.hits(mx, my);
+    saveModelBtn.hover  = saveModelBtn.hits(mx, my);
+    loadModelBtn.hover  = loadModelBtn.hits(mx, my);
     trainBtn.hover      = trainBtn.hits(mx, my);
     testBtn.hover       = testBtn.hits(mx, my);
-    rndStateBtn.hover   = rndStateBtn.hits(mx, my);
     RndSampBtn.hover    = RndSampBtn.hits(mx, my);
     NNBtn.hover         = NNBtn.hits(mx, my);
   }

@@ -99,9 +99,14 @@ class ModelStorage {
         if (parent != null && !parent.exists()) parent.mkdirs();
     }
 
-    String defaultSavePath() {
+    File modelDir() {
         File dir = new File(sketchPath(DEFAULT_DIR));
         if (!dir.exists()) dir.mkdirs();
+        return dir;
+    }
+
+    String defaultSavePath() {
+        modelDir();
         return sketchPath(DEFAULT_DIR + "/model_"
             + year() + nf(month(), 2) + nf(day(), 2)
             + "_" + nf(hour(), 2) + nf(minute(), 2) + nf(second(), 2)

@@ -1,5 +1,5 @@
-// 8-expert gradient ensemble. Each expert specialises in one shot type
-// and receives its own tailored heuristic list.
+// Ensemble of 8 specialised policy gradient experts, each trained with its own heuristic list and curriculum.
+// Each expert has its own limitations for curl, speed and angle, limiting it to only a certain type of shot.
 //
 // Expert index mapping (used by ShotTypeSelector):
 //   0 Draw         1 DrawCurlR  2 DrawCurlL
@@ -77,6 +77,7 @@ class GradientEnsemble {
     }
 
     // Train all experts. Each draws its own random depth from the curriculum cap.
+    // Depth is how many stones are left to play in the game. Lower depth = closer to the end of the game, higher = closer to the beginning.
     void trainAll(int depthCap, int shotsPerUpdate) {
         for (int i = 0; i < count; i++) {
             int depth = max(1, (int) random(1, depthCap + 1));
@@ -93,11 +94,14 @@ class GradientEnsemble {
     // with final-score rollout and pick the best deterministic action.
     Shot bestShot(ArrayList<Stone> layout, int stonesLeft, int lastTeam,
                   ShotTypeSelector selector, boolean logScores, boolean sampleMode) {
+        // Get the state representation from any expert (they should all be the same).
         NeuralPolicy refPolicy = trainers[0].policy;
         float[] state = refPolicy.convertState(layout, stonesLeft, lastTeam);
 
         int chosen;
         float[] probs = new float[count];
+
+        // If a selector is provided, use it to get probabilities for each expert. Otherwise, assume uniform probabilities.
         if (selector != null) {
             probs = selector.probs(state);
         } else {

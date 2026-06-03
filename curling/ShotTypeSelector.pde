@@ -1,6 +1,6 @@
 // Shot-type selector network.
 //
-// A small MLP: inputSize -> 3 hidden layers (RELU) -> numTypes (LINEAR logits).
+// A small neural network: inputSize -> 3 hidden layers (RELU) -> numTypes (LINEAR logits).
 // Training: for a given board state, evaluate each expert's shot via FinalScoreHeuristic
 // (full self-play rollout if depth > 1). Compute reward-weighted softmax target and
 // add an entropy bonus to prevent locking onto one shot type.

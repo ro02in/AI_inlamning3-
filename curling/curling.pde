@@ -42,10 +42,9 @@ enum AppMode { PLAY, TRAINING, TEST }
 
 AppMode appMode = AppMode.PLAY;
 
-// ----- Backend training constants (edit here to tune) --------
+// ----- Backend training constants. Tuneable. --------
 final int   SHOTS_PER_ROUND    = 50;    // shots sampled per expert per update
 final int   CURRICULUM_STEP    = 500;   // training steps before adding another stone depth
-final int   ROLLOUT_DEPTH_CAP  = 8;     // max rollout depth (TOTAL_STONES = full game)
 final float SELECTOR_ENTROPY   = 0.02f; // entropy bonus for shot-type selector
 final float EXPERT_ENTROPY     = 0.006f;// low-std support for shot experts
 final float SELECTOR_TEMP      = 1.0f;  // temperature for reward->target softmax

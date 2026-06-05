@@ -1,4 +1,4 @@
-// Oliwer Carpman, Rafal Galinski, Robin Karpman
+// Oliwer Carpman, Rafal Galinski, Robin Karim
 class RandomState {
 
     float hogY   = 45.0;

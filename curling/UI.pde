@@ -1,4 +1,4 @@
-// Oliwer Carpman, Rafal Galinski, Robin Karpman
+// Oliwer Carpman, Rafal Galinski, Robin Karim
 // =============================================================
 // UI - sliders + Skjut button drawn in the right sidebar.
 // =============================================================

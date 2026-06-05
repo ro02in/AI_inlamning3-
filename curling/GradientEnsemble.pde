@@ -1,4 +1,4 @@
-// Oliwer Carpman, Rafal Galinski, Robin Karpman
+// Oliwer Carpman, Rafal Galinski, Robin Karim
 // Ensemble of 8 specialised experts. Each expert predicts one kind of shot.
 //
 // Expert index mapping:

@@ -1,4 +1,4 @@
-// Oliwer Carpman, Rafal Galinski, Robin Karpman
+// Oliwer Carpman, Rafal Galinski, Robin Karim
 // =============================================================
 // Physics - all motion / collision logic for stones.
 // =============================================================

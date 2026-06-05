@@ -1,4 +1,4 @@
-// Oliwer Carpman, Rafal Galinski, Robin Karpman
+// Oliwer Carpman, Rafal Galinski, Robin Karim
 // Holds the outcome of one simulated shot.
 class ShotResult {
     ArrayList<Stone> stonesAfter;

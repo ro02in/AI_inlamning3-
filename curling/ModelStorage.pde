@@ -1,4 +1,4 @@
-// Oliwer Carpman, Rafal Galinski, Robin Karpman
+// Oliwer Carpman, Rafal Galinski, Robin Karim
 // Save / load deterministic NeuralPolicy weights + ShotTypeSelector.
 // File format: text .curlmodel with header + @policy blocks + @selector block.
 class ModelStorage {

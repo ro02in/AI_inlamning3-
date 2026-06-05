@@ -1,4 +1,4 @@
-// Oliwer Carpman, Rafal Galinski, Robin Karpman
+// Oliwer Carpman, Rafal Galinski, Robin Karim
 // Chooses which expert should be used for a board state.
 class ShotTypeSelector {
     GradientEnsemble ensemble;

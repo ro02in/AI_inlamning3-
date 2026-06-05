@@ -1,4 +1,4 @@
-// Oliwer Carpman, Rafal Galinski, Robin Karpman
+// Oliwer Carpman, Rafal Galinski, Robin Karim
 class NeuralPolicy {
     int inputSize = TOTAL_STONES * 4 + 2;
     int hiddenSize = 12;

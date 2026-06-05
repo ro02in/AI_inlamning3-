@@ -1,4 +1,4 @@
-// Oliwer Carpman, Rafal Galinski, Robin Karpman
+// Oliwer Carpman, Rafal Galinski, Robin Karim
 // =============================================================
 // Stone - one curling stone (data + rendering only).
 // =============================================================

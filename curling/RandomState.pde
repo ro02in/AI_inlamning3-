@@ -1,3 +1,4 @@
+// Oliwer Carpman, Rafal Galinski, Robin Karpman
 class RandomState {
 
     float hogY   = 45.0;

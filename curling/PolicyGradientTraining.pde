@@ -1,3 +1,4 @@
+// Oliwer Carpman, Rafal Galinski, Robin Karpman
 // Simple gradient training for one shot expert.
 //
 // Each update:

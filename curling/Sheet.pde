@@ -1,3 +1,4 @@
+// Oliwer Carpman, Rafal Galinski, Robin Karpman
 // =============================================================
 // Sheet - standard curling geometry (feet) + drawing.
 // =============================================================

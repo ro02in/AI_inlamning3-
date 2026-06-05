@@ -1,3 +1,4 @@
+// Oliwer Carpman, Rafal Galinski, Robin Karpman
 // =============================================================
 // House - tee / ring geometry and end-of-end scoring.
 // =============================================================

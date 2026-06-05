@@ -1,3 +1,4 @@
+// Oliwer Carpman, Rafal Galinski, Robin Karpman
 // =============================================================
 // Game - turn management + state machine.
 // =============================================================

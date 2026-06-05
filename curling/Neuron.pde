@@ -1,3 +1,4 @@
+// Oliwer Carpman, Rafal Galinski, Robin Karpman
 // Activation function choice for a Neuron / NeuronLayer.
 // TANH is useful for bounded outputs, RELU for hidden layers, LINEAR for raw scores.
 enum ActivationKind { TANH, RELU, LINEAR }

@@ -48,6 +48,7 @@ final int   CURRICULUM_STEP    = 500;   // training steps before adding another 
 final int   PLAY_CANDIDATE_EXPERTS = 3; // current expert shots tested during NN play
 final int   NEXT_UTILITY_EXPERTS   = 3; // next-shot experts used for expected utility
 final int   SIMS_PER_EXPERT_SHOT  = 3;  // repeated simulations per expert shot
+final int   SIMS_PER_NEXT_EXPERT  = 3;  // repeated simulations per next-shot expert
 final float SELECTOR_TEMP      = 1.0f;  // temperature for reward->target softmax
 final float SELECTOR_LR        = 0.001f;// selector network learning rate
 final float SELECTOR_TYPE_REWARD_BLEND = 0.30f; // finalScore + blend * type heuristic

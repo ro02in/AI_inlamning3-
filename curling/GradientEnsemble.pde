@@ -162,23 +162,42 @@ class GradientEnsemble {
     float expectedUtilityAfterShot(Shot candidate, ArrayList<Stone> layout,
                                    int remainingShotsAfterCurrent,
                                    ShotTypeSelector selector) {
-        ArrayList<Stone> afterCandidate = simulateOneShot(layout, candidate, TEAM_YELLOW);
-        int remainingShots = max(0, remainingShotsAfterCurrent);
-        if (remainingShots == 0) {
-            return house.scoreEnd(afterCandidate).yellowFitness();
-        }
-
-        return expectedUtilityOfNextShot(afterCandidate, remainingShots, selector);
+        return longTermUtilityAfterYellowShot(candidate, layout,
+                                              remainingShotsAfterCurrent,
+                                              selector);
     }
 
-    float expectedUtilityOfNextShot(ArrayList<Stone> boardAfterYellow,
-                                    int remainingShots,
-                                    ShotTypeSelector selector) {
-        int nextTeam = TEAM_RED;
+    float longTermUtilityAfterYellowShot(Shot candidate, ArrayList<Stone> layout,
+                                         int remainingShotsAfterCurrent,
+                                         ShotTypeSelector selector) {
+        ArrayList<Stone> afterCandidate = simulateOneShot(layout, candidate, TEAM_YELLOW);
+        return longTermUtilityFromBoard(afterCandidate,
+                                        remainingShotsAfterCurrent,
+                                        TEAM_RED,
+                                        selector);
+    }
+
+    float longTermUtilityFromBoard(ArrayList<Stone> board,
+                                   int remainingShots,
+                                   int nextTeam,
+                                   ShotTypeSelector selector) {
+        remainingShots = max(0, remainingShots);
+        if (remainingShots == 0) {
+            return house.scoreEnd(board).yellowFitness();
+        }
+        return expectedUtilityAfterNextOpponentShot(board, remainingShots,
+                                                    nextTeam, selector);
+    }
+
+    float expectedUtilityAfterNextOpponentShot(ArrayList<Stone> board,
+                                               int remainingShots,
+                                               int nextTeam,
+                                               ShotTypeSelector selector) {
         int stonesLeft = max(1, (int) ceil(remainingShots / 2.0));
 
-        ArrayList<Stone> selectorBoard = flipTeams(boardAfterYellow);
-        float[] probs = selectorProbs(selectorBoard, stonesLeft, TEAM_YELLOW, selector);
+        ArrayList<Stone> selectorBoard = boardForTeamPerspective(board, nextTeam);
+        int lastTeam = lastTeamFromShooterPerspective();
+        float[] probs = selectorProbs(selectorBoard, stonesLeft, lastTeam, selector);
         int[] nextExperts = topExperts(probs, min(NEXT_UTILITY_EXPERTS, count));
 
         float probSum = 0;
@@ -193,15 +212,72 @@ class GradientEnsemble {
             float weight = useUniformWeights
                 ? 1.0f / nextExperts.length
                 : max(0, probs[expertIdx]) / probSum;
-
-            Shot nextShot = expertMeanShot(expertIdx, selectorBoard,
-                                           stonesLeft, TEAM_YELLOW);
-            ArrayList<Stone> afterNext = simulateOneShot(boardAfterYellow,
-                                                         nextShot, nextTeam);
-            float utility = house.scoreEnd(afterNext).yellowFitness();
+            float utility = averageNextExpertUtility(expertIdx, board,
+                                                     remainingShots,
+                                                     nextTeam, selector);
             expected += weight * utility;
         }
         return expected;
+    }
+
+    float averageNextExpertUtility(int expertIdx, ArrayList<Stone> board,
+                                   int remainingShots,
+                                   int nextTeam,
+                                   ShotTypeSelector selector) {
+        int sims = max(1, SIMS_PER_NEXT_EXPERT);
+        int stonesLeft = max(1, (int) ceil(remainingShots / 2.0));
+        float total = 0;
+
+        for (int i = 0; i < sims; i++) {
+            Shot nextShot = shotForTeam(expertIdx, board, nextTeam, stonesLeft);
+            ArrayList<Stone> afterNext = simulateOneShot(board, nextShot, nextTeam);
+            total += rolloutToEndDeterministic(afterNext,
+                                               max(0, remainingShots - 1),
+                                               otherTeam(nextTeam),
+                                               selector);
+        }
+        return total / sims;
+    }
+
+    float rolloutToEndDeterministic(ArrayList<Stone> startBoard,
+                                    int remainingShots,
+                                    int nextTeam,
+                                    ShotTypeSelector selector) {
+        ArrayList<Stone> board = copyLayout(startBoard);
+        int team = nextTeam;
+        int remaining = max(0, remainingShots);
+
+        while (remaining > 0) {
+            int stonesLeft = max(1, (int) ceil(remaining / 2.0));
+            ArrayList<Stone> selectorBoard = boardForTeamPerspective(board, team);
+            int lastTeam = lastTeamFromShooterPerspective();
+            float[] probs = selectorProbs(selectorBoard, stonesLeft, lastTeam, selector);
+            int expertIdx = topExperts(probs, 1)[0];
+
+            Shot shot = shotForTeam(expertIdx, board, team, stonesLeft);
+            board = simulateOneShot(board, shot, team);
+            team = otherTeam(team);
+            remaining--;
+        }
+        return house.scoreEnd(board).yellowFitness();
+    }
+
+    Shot shotForTeam(int expertIdx, ArrayList<Stone> board, int team, int stonesLeft) {
+        ArrayList<Stone> stateBoard = boardForTeamPerspective(board, team);
+        int lastTeam = lastTeamFromShooterPerspective();
+        return expertMeanShot(expertIdx, stateBoard, stonesLeft, lastTeam);
+    }
+
+    ArrayList<Stone> boardForTeamPerspective(ArrayList<Stone> board, int team) {
+        return team == TEAM_YELLOW ? board : flipTeams(board);
+    }
+
+    int lastTeamFromShooterPerspective() {
+        return TEAM_RED;
+    }
+
+    int otherTeam(int team) {
+        return team == TEAM_RED ? TEAM_YELLOW : TEAM_RED;
     }
 
     ArrayList<Stone> simulateOneShot(ArrayList<Stone> layout, Shot shot, int team) {

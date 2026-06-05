@@ -4,7 +4,7 @@ class ShotTypeSelector {
     int numTypes;
     int inputSize;
     int hiddenSize = 12;
-    int defaultHiddenLayerCount = 3;
+    int defaultHiddenLayerCount = 5;
 
     NeuronLayer[] hiddenLayers;
     NeuronLayer outputLayer;
@@ -84,6 +84,7 @@ class ShotTypeSelector {
         int stonesToPlace = TOTAL_STONES - depth;
         randomState.randomizeForDepth(stones, stonesToPlace);
         int stonesLeft = max(1, (int) ceil(depth / 2.0));
+        int remainingShotsAfterCurrent = max(0, depth - 1);
 
         NeuralPolicy refPolicy = ensemble.anyPolicy();
         float[] state = refPolicy.convertState(stones, stonesLeft, TEAM_RED);
@@ -94,7 +95,7 @@ class ShotTypeSelector {
             NeuralPolicy p = ensemble.trainers[t].policy;
             float[] expertState = p.convertState(stones, stonesLeft, TEAM_RED);
             Shot shot = p.predictMean(expertState);
-            ShotResult result = simulateShot(shot, stones);
+            ShotResult result = simulateShot(shot, stones, remainingShotsAfterCurrent);
 
             float typeReward = 0;
             for (Heuristic h : ensemble.typeHeuristics[t]) {
@@ -149,7 +150,8 @@ class ShotTypeSelector {
         return softmax(scaled);
     }
 
-    private ShotResult simulateShot(Shot shot, ArrayList<Stone> layout) {
+    private ShotResult simulateShot(Shot shot, ArrayList<Stone> layout,
+                                    int remainingShotsAfterCurrent) {
         ArrayList<Stone> before = copyLayout(layout);
         ArrayList<Stone> simStones = copyLayout(layout);
         ScoreResult scoreBefore = house.scoreEnd(simStones);
@@ -169,7 +171,8 @@ class ShotTypeSelector {
             if (!anyMoving) break;
         }
 
-        return new ShotResult(simStones, before, fired, scoreBefore, shot);
+        return new ShotResult(simStones, before, fired, scoreBefore, shot,
+                              remainingShotsAfterCurrent);
     }
 
     private ArrayList<Stone> copyLayout(ArrayList<Stone> layout) {

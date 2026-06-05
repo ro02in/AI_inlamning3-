@@ -1,7 +1,7 @@
 class NeuralPolicy {
     int inputSize = TOTAL_STONES * 4 + 2;
-    int hiddenSize = 16;
-    int defaultHiddenLayerCount = 3;
+    int hiddenSize = 12;
+    int defaultHiddenLayerCount = 5;
     int outputSize = 3;
 
     final ActivationKind HIDDEN_ACTIVATION = ActivationKind.RELU;

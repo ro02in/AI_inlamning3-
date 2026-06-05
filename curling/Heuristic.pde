@@ -5,14 +5,17 @@ class ShotResult {
     Stone            fired;
     ScoreResult      scoreBefore;
     Shot             plannedShot;
+    int              remainingShotsAfterCurrent;
 
     ShotResult(ArrayList<Stone> stonesAfter, ArrayList<Stone> stonesBefore,
-               Stone fired, ScoreResult scoreBefore, Shot plannedShot) {
+               Stone fired, ScoreResult scoreBefore, Shot plannedShot,
+               int remainingShotsAfterCurrent) {
         this.stonesAfter         = stonesAfter;
         this.stonesBefore        = stonesBefore;
         this.fired               = fired;
         this.scoreBefore         = scoreBefore;
         this.plannedShot         = plannedShot;
+        this.remainingShotsAfterCurrent = remainingShotsAfterCurrent;
     }
 }
 
@@ -275,7 +278,7 @@ class FreezeHeuristic extends Heuristic {
     }
 }
 
-// ---- FinalScore heuristic: immediate score after this shot ----
+// ---- FinalScore heuristic: long-term score after this shot ----
 class FinalScoreHeuristic extends Heuristic {
     FinalScoreHeuristic() {
         this.scale  = 3.0;
@@ -284,7 +287,16 @@ class FinalScoreHeuristic extends Heuristic {
 
     @Override
     float scoreResult(ShotResult result) {
-        ScoreResult after = house.scoreEnd(result.stonesAfter);
-        return after.diffFrom(result.scoreBefore);
+        if (gradientEnsemble == null) {
+            ScoreResult after = house.scoreEnd(result.stonesAfter);
+            return after.diffFrom(result.scoreBefore);
+        }
+        float longTerm = gradientEnsemble.longTermUtilityFromBoard(
+            result.stonesAfter,
+            result.remainingShotsAfterCurrent,
+            TEAM_RED,
+            shotSelector
+        );
+        return longTerm - result.scoreBefore.yellowFitness();
     }
 }

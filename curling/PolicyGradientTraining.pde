@@ -61,6 +61,7 @@ class PolicyGradientTraining {
         randomState.randomizeForExpert(stones, stonesToPlace, curriculumExpert);
 
         int stonesLeft = max(1, (int) ceil(depth / 2.0));
+        int remainingShotsAfterCurrent = max(0, depth - 1);
         float[] state = policy.convertState(stones, stonesLeft, TEAM_RED);
 
         float[] predictedRaw = policy.rawOutput(state);
@@ -74,7 +75,9 @@ class PolicyGradientTraining {
             sampledRaw[k][1] = constrain(predictedRaw[1] + randomGaussian() * EXPLORE_SPEED_TANH, -1f, 1f);
             sampledRaw[k][2] = constrain(predictedRaw[2] + randomGaussian() * EXPLORE_ANGLE_TANH, -1f, 1f);
 
-            ShotResult result = simulateShot(policy.shotFromRaw(sampledRaw[k]), stones);
+            ShotResult result = simulateShot(policy.shotFromRaw(sampledRaw[k]),
+                                             stones,
+                                             remainingShotsAfterCurrent);
             float score = 0;
             for (Heuristic h : heuristics) {
                 score += h.contribute(h.scoreResult(result));
@@ -115,7 +118,8 @@ class PolicyGradientTraining {
         }
     }
 
-    ShotResult simulateShot(Shot shot, ArrayList<Stone> layout) {
+    ShotResult simulateShot(Shot shot, ArrayList<Stone> layout,
+                            int remainingShotsAfterCurrent) {
         ArrayList<Stone> before = copyLayout(layout);
         ArrayList<Stone> simStones = copyLayout(layout);
         ScoreResult scoreBefore = house.scoreEnd(simStones);
@@ -135,7 +139,8 @@ class PolicyGradientTraining {
             if (!anyMoving) break;
         }
 
-        return new ShotResult(simStones, before, fired, scoreBefore, shot);
+        return new ShotResult(simStones, before, fired, scoreBefore, shot,
+                              remainingShotsAfterCurrent);
     }
 
     private ArrayList<Stone> copyLayout(ArrayList<Stone> layout) {

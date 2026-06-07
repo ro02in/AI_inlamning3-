@@ -90,7 +90,7 @@ class ModelStorage {
         int n = min(gradientEnsemble.count, loaded.size());
         for (int i = 0; i < n; i++) {
             gradientEnsemble.trainers[i].setPolicy(loaded.get(i).policy,
-                                                   loaded.get(i).updateCount);
+                                                loaded.get(i).updateCount);
         }
 
         lastMessage = "Laddad (" + loaded.size() + " experts, "

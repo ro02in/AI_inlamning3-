@@ -9,7 +9,7 @@ class GradientEnsemble {
     String[] names;
     PolicyGradientTraining[] trainers;
     ArrayList<Heuristic>[] typeHeuristics;
-    int count;
+    int count; // number of experts in the ensemble
     FinalScoreHeuristic finalHeuristic = new FinalScoreHeuristic();
 
     GradientEnsemble() {
@@ -73,9 +73,10 @@ class GradientEnsemble {
         for (int i = 0; i < count; i++) trainers[i].reset();
     }
 
+    // Picks the best shot from top-k experts by simulated long-term utility.
     Shot bestShot(ArrayList<Stone> layout, int stonesLeft, int lastTeam,
-                  int remainingShotsAfterCurrent,
-                  ShotTypeSelector selector, boolean logScores, boolean sampleMode) {
+                int remainingShotsAfterCurrent,
+                ShotTypeSelector selector, boolean logScores, boolean sampleMode) {
         int chosen = 0;
         Shot best = null;
         float bestUtility = Float.NEGATIVE_INFINITY;
@@ -113,11 +114,11 @@ class GradientEnsemble {
     Shot expertMeanShot(int expertIdx, ArrayList<Stone> layout, int stonesLeft, int lastTeam) {
         NeuralPolicy p = trainers[expertIdx].policy;
         float[] state = p.convertState(layout, stonesLeft, lastTeam);
-        return p.predictMean(state);
+        return p.predict(state);
     }
 
     float[] selectorProbs(ArrayList<Stone> stateBoard, int stonesLeft, int lastTeam,
-                          ShotTypeSelector selector) {
+                        ShotTypeSelector selector) {
         if (selector == null) {
             float[] uniform = new float[count];
             for (int i = 0; i < count; i++) uniform[i] = 1.0f / count;
@@ -148,29 +149,21 @@ class GradientEnsemble {
     }
 
     float averageUtilityAfterShot(Shot candidate, ArrayList<Stone> layout,
-                                  int remainingShotsAfterCurrent,
-                                  ShotTypeSelector selector) {
+                                int remainingShotsAfterCurrent,
+                                ShotTypeSelector selector) {
         int sims = max(1, SIMS_PER_EXPERT_SHOT);
         float total = 0;
         for (int i = 0; i < sims; i++) {
-            total += expectedUtilityAfterShot(candidate, layout,
-                                              remainingShotsAfterCurrent,
-                                              selector);
+            total += longTermUtilityAfterYellowShot(candidate, layout,
+                                            remainingShotsAfterCurrent,
+                                            selector);
         }
         return total / sims;
     }
 
-    float expectedUtilityAfterShot(Shot candidate, ArrayList<Stone> layout,
-                                   int remainingShotsAfterCurrent,
-                                   ShotTypeSelector selector) {
-        return longTermUtilityAfterYellowShot(candidate, layout,
-                                              remainingShotsAfterCurrent,
-                                              selector);
-    }
-
     float longTermUtilityAfterYellowShot(Shot candidate, ArrayList<Stone> layout,
-                                         int remainingShotsAfterCurrent,
-                                         ShotTypeSelector selector) {
+                                        int remainingShotsAfterCurrent,
+                                        ShotTypeSelector selector) {
         ArrayList<Stone> afterCandidate = simulateOneShot(layout, candidate, TEAM_YELLOW);
         return longTermUtilityFromBoard(afterCandidate,
                                         remainingShotsAfterCurrent,
@@ -179,9 +172,9 @@ class GradientEnsemble {
     }
 
     float longTermUtilityFromBoard(ArrayList<Stone> board,
-                                   int remainingShots,
-                                   int nextTeam,
-                                   ShotTypeSelector selector) {
+                                int remainingShots,
+                                int nextTeam,
+                                ShotTypeSelector selector) {
         remainingShots = max(0, remainingShots);
         if (remainingShots == 0) {
             return house.scoreEnd(board).yellowFitness();
@@ -191,9 +184,9 @@ class GradientEnsemble {
     }
 
     float expectedUtilityAfterNextOpponentShot(ArrayList<Stone> board,
-                                               int remainingShots,
-                                               int nextTeam,
-                                               ShotTypeSelector selector) {
+                                            int remainingShots,
+                                            int nextTeam,
+                                            ShotTypeSelector selector) {
         int stonesLeft = max(1, (int) ceil(remainingShots / 2.0));
 
         ArrayList<Stone> selectorBoard = boardForTeamPerspective(board, nextTeam);
@@ -214,17 +207,17 @@ class GradientEnsemble {
                 ? 1.0f / nextExperts.length
                 : max(0, probs[expertIdx]) / probSum;
             float utility = averageNextExpertUtility(expertIdx, board,
-                                                     remainingShots,
-                                                     nextTeam, selector);
+                                                    remainingShots,
+                                                    nextTeam, selector);
             expected += weight * utility;
         }
         return expected;
     }
 
     float averageNextExpertUtility(int expertIdx, ArrayList<Stone> board,
-                                   int remainingShots,
-                                   int nextTeam,
-                                   ShotTypeSelector selector) {
+                                int remainingShots,
+                                int nextTeam,
+                                ShotTypeSelector selector) {
         int sims = max(1, SIMS_PER_NEXT_EXPERT);
         int stonesLeft = max(1, (int) ceil(remainingShots / 2.0));
         float total = 0;
@@ -233,9 +226,9 @@ class GradientEnsemble {
             Shot nextShot = shotForTeam(expertIdx, board, nextTeam, stonesLeft);
             ArrayList<Stone> afterNext = simulateOneShot(board, nextShot, nextTeam);
             total += rolloutToEndDeterministic(afterNext,
-                                               max(0, remainingShots - 1),
-                                               otherTeam(nextTeam),
-                                               selector);
+                                            max(0, remainingShots - 1),
+                                            otherTeam(nextTeam),
+                                            selector);
         }
         return total / sims;
     }
@@ -273,6 +266,8 @@ class GradientEnsemble {
         return team == TEAM_YELLOW ? board : flipTeams(board);
     }
 
+    // Always TEAM_RED: the AI shoots as Yellow, so the last-thrower in state
+    // encoding is always the opponent (Red) from the shooter's perspective.
     int lastTeamFromShooterPerspective() {
         return TEAM_RED;
     }
@@ -299,16 +294,6 @@ class GradientEnsemble {
             if (!anyMoving) break;
         }
         return simStones;
-    }
-
-    ArrayList<Stone> copyLayout(ArrayList<Stone> layout) {
-        ArrayList<Stone> copy = new ArrayList<Stone>();
-        for (Stone s : layout) {
-            Stone c = new Stone(s.pos.x, s.pos.y, s.team);
-            c.hogPassed = s.hogPassed;
-            copy.add(c);
-        }
-        return copy;
     }
 
     ArrayList<Stone> flipTeams(ArrayList<Stone> board) {

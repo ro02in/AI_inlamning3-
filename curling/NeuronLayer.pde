@@ -14,7 +14,7 @@ class NeuronLayer {
     // Backwards-compatible: false = TANH, true = LINEAR.
     NeuronLayer(int neuronCount, int inputCountPerNeuron, boolean linear) {
         this(neuronCount, inputCountPerNeuron,
-             linear ? ActivationKind.LINEAR : ActivationKind.TANH);
+            linear ? ActivationKind.LINEAR : ActivationKind.TANH);
     }
 
     NeuronLayer(int neuronCount, int inputCountPerNeuron, ActivationKind activation) {
@@ -93,9 +93,9 @@ class NeuronLayer {
 
     void appendSave(StringBuilder sb, String layerTag) {
         sb.append("@layer ").append(layerTag).append(' ')
-          .append(activationName(neurons[0].activation)).append(' ')
-          .append(neurons.length).append(' ')
-          .append(neurons[0].weights.length).append('\n');
+            .append(activationName(neurons[0].activation)).append(' ')
+            .append(neurons.length).append(' ')
+            .append(neurons[0].weights.length).append('\n');
         for (Neuron n : neurons) {
             n.appendSaveLine(sb);
         }

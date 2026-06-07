@@ -133,10 +133,6 @@ class NeuralPolicy {
         return shotFromRaw(rawOutput(state));
     }
 
-    Shot predictMean(float[] state) {
-        return predict(state);
-    }
-
     void backwardOutput(float[] gradOutput, float lr) {
         float[] gradHidden = outputLayer.backward(gradOutput, lr);
         for (int i = hiddenLayers.length - 1; i >= 0; i--) {

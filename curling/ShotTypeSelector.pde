@@ -95,7 +95,7 @@ class ShotTypeSelector {
         for (int t = 0; t < numTypes; t++) {
             NeuralPolicy p = ensemble.trainers[t].policy;
             float[] expertState = p.convertState(stones, stonesLeft, TEAM_RED);
-            Shot shot = p.predictMean(expertState);
+            Shot shot = p.predict(expertState);
             ShotResult result = simulateShot(shot, stones, remainingShotsAfterCurrent);
 
             float typeReward = 0;
@@ -173,17 +173,7 @@ class ShotTypeSelector {
         }
 
         return new ShotResult(simStones, before, fired, scoreBefore, shot,
-                              remainingShotsAfterCurrent);
-    }
-
-    private ArrayList<Stone> copyLayout(ArrayList<Stone> layout) {
-        ArrayList<Stone> copy = new ArrayList<Stone>();
-        for (Stone s : layout) {
-            Stone c = new Stone(s.pos.x, s.pos.y, s.team);
-            c.hogPassed = s.hogPassed;
-            copy.add(c);
-        }
-        return copy;
+                            remainingShotsAfterCurrent);
     }
 
     void appendSave(StringBuilder sb) {

@@ -51,10 +51,6 @@ class PolicyGradientTraining {
         if (loadedUpdateCount >= 0) updateCount = loadedUpdateCount;
     }
 
-    void updateStep(ArrayList<Heuristic> heuristics, int depth) {
-        updateStep(heuristics, depth, expertName);
-    }
-
     void updateStep(ArrayList<Heuristic> heuristics, int depth, String curriculumExpert) {
         if (heuristics == null || heuristics.isEmpty()) return;
 
@@ -77,8 +73,8 @@ class PolicyGradientTraining {
             sampledRaw[k][2] = constrain(predictedRaw[2] + randomGaussian() * EXPLORE_ANGLE_TANH, -1f, 1f);
 
             ShotResult result = simulateShot(policy.shotFromRaw(sampledRaw[k]),
-                                             stones,
-                                             remainingShotsAfterCurrent);
+                                            stones,
+                                            remainingShotsAfterCurrent);
             float score = 0;
             for (Heuristic h : heuristics) {
                 score += h.contribute(h.scoreResult(result));
@@ -141,17 +137,7 @@ class PolicyGradientTraining {
         }
 
         return new ShotResult(simStones, before, fired, scoreBefore, shot,
-                              remainingShotsAfterCurrent);
-    }
-
-    private ArrayList<Stone> copyLayout(ArrayList<Stone> layout) {
-        ArrayList<Stone> copy = new ArrayList<Stone>();
-        for (Stone s : layout) {
-            Stone c = new Stone(s.pos.x, s.pos.y, s.team);
-            c.hogPassed = s.hogPassed;
-            copy.add(c);
-        }
-        return copy;
+                            remainingShotsAfterCurrent);
     }
 
     private int[] topKIndices(float[] values, int k) {

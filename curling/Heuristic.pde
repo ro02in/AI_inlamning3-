@@ -9,8 +9,8 @@ class ShotResult {
     int              remainingShotsAfterCurrent;
 
     ShotResult(ArrayList<Stone> stonesAfter, ArrayList<Stone> stonesBefore,
-               Stone fired, ScoreResult scoreBefore, Shot plannedShot,
-               int remainingShotsAfterCurrent) {
+            Stone fired, ScoreResult scoreBefore, Shot plannedShot,
+            int remainingShotsAfterCurrent) {
         this.stonesAfter         = stonesAfter;
         this.stonesBefore        = stonesBefore;
         this.fired               = fired;

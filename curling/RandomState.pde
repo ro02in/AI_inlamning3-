@@ -68,9 +68,9 @@ class RandomState {
             }
         }
         placeInBox(stones, TEAM_RED,
-                   sheet.centerX - 2.0f, sheet.centerX + 2.0f,
-                   house.BUTTON.y - house.OUTER_RING - 4.0f,
-                   house.BUTTON.y - house.OUTER_RING - 0.5f);
+                sheet.centerX - 2.0f, sheet.centerX + 2.0f,
+                house.BUTTON.y - house.OUTER_RING - 4.0f,
+                house.BUTTON.y - house.OUTER_RING - 0.5f);
     }
 
     private void placeInHouse(ArrayList<Stone> stones, int team) {
